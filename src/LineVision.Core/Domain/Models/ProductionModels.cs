@@ -30,6 +30,7 @@ public class ProductionCycle
     public DateTime FechaInicio { get; set; } = DateTime.UtcNow;
     public DateTime? FechaFin { get; set; }
     public string? QR_Cuna { get; set; }
+    public string? Cradle_Code { get; set; }
     public string? CradleResult { get; set; } // "OK", "NOK", "BYPASS"
     public string? PanelResult { get; set; }  // "OK", "NOK", "BYPASS"
     public string? InspectionPlan { get; set; }

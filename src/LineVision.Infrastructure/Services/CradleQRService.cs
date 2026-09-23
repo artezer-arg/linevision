@@ -55,6 +55,95 @@ public class CradleQRService : ICradleQRService
         _logger.LogInformation("Cradle QR configuration updated successfully");
     }
 
+    public async Task<string> ResolveCradleCodeAsync(string qrCode, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(qrCode))
+            return "CUNA-01";
+
+        qrCode = qrCode.Trim();
+
+        // 1. Buscar coincidencia exacta en tabla CradleQR
+        const string sqlExact = "SELECT Cradle_Code FROM CradleQR WHERE QR_Pattern = @qrCode AND Activo = 1 LIMIT 1";
+        var code = await _db.QuerySingleOrDefaultAsync<string>(sqlExact, new { qrCode }, ct);
+        if (!string.IsNullOrWhiteSpace(code))
+            return code.Trim();
+
+        // 2. Si el QR mismo tiene formato "CUNA-XX" o similar (ej. "CUNA-01", "CUNA-02")
+        var matchCuna = Regex.Match(qrCode, @"^(CUNA[-_]?[0-9A-Z]+)", RegexOptions.IgnoreCase);
+        if (matchCuna.Success)
+        {
+            string candidate = matchCuna.Groups[1].Value.ToUpperInvariant();
+            // Normalizar a formato CUNA-XX si viene como CUNA01 o CUNA_01
+            if (candidate.StartsWith("CUNA") && !candidate.StartsWith("CUNA-") && candidate.Length > 4)
+            {
+                candidate = "CUNA-" + candidate.Substring(candidate.StartsWith("CUNA_") ? 5 : 4);
+            }
+            return candidate;
+        }
+
+        return "CUNA-01";
+    }
+
+    public async Task<bool> ValidateCradleCompatibilityAsync(string cradleCode, ProductContext expectedContext, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(cradleCode))
+            return false;
+
+        cradleCode = cradleCode.Trim();
+
+        // 1. Verificar si existe asociación explícita en tabla CradleQR
+        const string sqlCradle = @"
+            SELECT COUNT(1) FROM CradleQR 
+            WHERE Cradle_Code = @cradleCode 
+              AND Modelo = @Modelo 
+              AND Mano = @Mano 
+              AND Posicion = @Posicion 
+              AND Activo = 1";
+
+        int cradleMatches = await _db.QuerySingleOrDefaultAsync<int>(sqlCradle, new
+        {
+            cradleCode,
+            expectedContext.Modelo,
+            expectedContext.Mano,
+            expectedContext.Posicion
+        }, ct);
+
+        if (cradleMatches > 0)
+        {
+            _logger.LogInformation("Cradle {Cradle} is authorized in CradleQR table for {Model}/{Hand}/{Pos}",
+                cradleCode, expectedContext.Modelo, expectedContext.Mano, expectedContext.Posicion);
+            return true;
+        }
+
+        // 2. Verificar si existe receta de soldadura activa configurada para esa cuna y panel
+        const string sqlRecipe = @"
+            SELECT COUNT(1) FROM RobotRecipe 
+            WHERE Cradle_Code = @cradleCode 
+              AND Modelo = @Modelo 
+              AND Mano = @Mano 
+              AND Posicion = @Posicion 
+              AND Activo = 1";
+
+        int recipeMatches = await _db.QuerySingleOrDefaultAsync<int>(sqlRecipe, new
+        {
+            cradleCode,
+            expectedContext.Modelo,
+            expectedContext.Mano,
+            expectedContext.Posicion
+        }, ct);
+
+        if (recipeMatches > 0)
+        {
+            _logger.LogInformation("Cradle {Cradle} is authorized via RobotRecipe table for {Model}/{Hand}/{Pos}",
+                cradleCode, expectedContext.Modelo, expectedContext.Mano, expectedContext.Posicion);
+            return true;
+        }
+
+        _logger.LogWarning("Cradle {Cradle} is NOT compatible with Panel {Model}/{Hand}/{Pos} (No CradleQR mapping or RobotRecipe found)",
+            cradleCode, expectedContext.Modelo, expectedContext.Mano, expectedContext.Posicion);
+        return false;
+    }
+
     public async Task<bool> ValidateQRAsync(string qrCode, ProductContext expectedContext, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(qrCode))
@@ -80,67 +169,20 @@ public class CradleQRService : ICradleQRService
             return false;
         }
 
-        // 3. Validar Regex Paramétrico (si está configurado)
-        if (!string.IsNullOrEmpty(config.RegexPattern))
+        // 3. Resolver código de cuna
+        string cradleCode = await ResolveCradleCodeAsync(qrCode, ct);
+
+        // 4. Validar compatibilidad de la cuna con el panel
+        bool isCompatible = await ValidateCradleCompatibilityAsync(cradleCode, expectedContext, ct);
+        if (!isCompatible)
         {
-            var match = Regex.Match(qrCode, config.RegexPattern, RegexOptions.IgnoreCase);
-            if (!match.Success)
-            {
-                _logger.LogWarning("QR Code '{QR}' does not match regex pattern '{Regex}'", qrCode, config.RegexPattern);
-                return false;
-            }
-
-            // Si el regex contiene grupos con nombre ("model", "hand", "pos"), validarlos directamente
-            if (match.Groups["model"].Success && !string.Equals(match.Groups["model"].Value, expectedContext.Modelo, StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning("QR Model mismatch: Found '{Found}' vs Expected '{Expected}'",
-                    match.Groups["model"].Value, expectedContext.Modelo);
-                return false;
-            }
-
-            if (match.Groups["hand"].Success && !string.Equals(match.Groups["hand"].Value, expectedContext.Mano, StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning("QR Hand mismatch: Found '{Found}' vs Expected '{Expected}'",
-                    match.Groups["hand"].Value, expectedContext.Mano);
-                return false;
-            }
-
-            if (match.Groups["pos"].Success && !string.Equals(match.Groups["pos"].Value, expectedContext.Posicion, StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning("QR Position mismatch: Found '{Found}' vs Expected '{Expected}'",
-                    match.Groups["pos"].Value, expectedContext.Posicion);
-                return false;
-            }
-        }
-
-        // 4. Validar contra tabla de asociación CradleQR en Base de Datos
-        const string sql = "SELECT * FROM CradleQR WHERE QR_Pattern = @qrCode AND Activo = 1";
-        var mapping = await _db.QuerySingleOrDefaultAsync<CradleQRMapping>(sql, new { qrCode }, ct);
-
-        if (mapping == null)
-        {
-            if (config.RequireExactMatchInDatabase)
-            {
-                _logger.LogWarning("QR Code '{QR}' is not registered in [CradleQR] table", qrCode);
-                return false;
-            }
-            return true;
-        }
-
-        bool matchProduct = string.Equals(mapping.Modelo, expectedContext.Modelo, StringComparison.OrdinalIgnoreCase) &&
-                            string.Equals(mapping.Mano, expectedContext.Mano, StringComparison.OrdinalIgnoreCase) &&
-                            string.Equals(mapping.Posicion, expectedContext.Posicion, StringComparison.OrdinalIgnoreCase);
-
-        if (!matchProduct)
-        {
-            _logger.LogWarning("Cradle QR '{QR}' matches DB record but belongs to ({Model}/{Hand}/{Pos}) instead of expected ({ExpModel}/{ExpHand}/{ExpPos})",
-                qrCode, mapping.Modelo, mapping.Mano, mapping.Posicion,
-                expectedContext.Modelo, expectedContext.Mano, expectedContext.Posicion);
+            _logger.LogWarning("QR '{QR}' resolved to Cradle '{Cradle}' which is not compatible with product {Model}/{Hand}/{Pos}",
+                qrCode, cradleCode, expectedContext.Modelo, expectedContext.Mano, expectedContext.Posicion);
             return false;
         }
 
-        _logger.LogInformation("Cradle QR validated OK: '{QR}' corresponds to expected order ({Model}/{Hand}/{Pos})",
-            qrCode, expectedContext.Modelo, expectedContext.Mano, expectedContext.Posicion);
+        _logger.LogInformation("Cradle QR validated OK: '{QR}' -> Cradle '{Cradle}' compatible with {Model}/{Hand}/{Pos}",
+            qrCode, cradleCode, expectedContext.Modelo, expectedContext.Mano, expectedContext.Posicion);
 
         return true;
     }

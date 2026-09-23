@@ -85,6 +85,7 @@ public class TraceabilityService : ITraceabilityService
             UPDATE ProductionCycle SET
                 FechaFin = @FechaFin,
                 QR_Cuna = @QR_Cuna,
+                Cradle_Code = @Cradle_Code,
                 CradleResult = @CradleResult,
                 PanelResult = @PanelResult,
                 InspectionPlan = @InspectionPlan,
@@ -108,6 +109,7 @@ public class TraceabilityService : ITraceabilityService
             Cycle_ID = cycle.Cycle_ID.ToString(),
             FechaFin = cycle.FechaFin?.ToString("o"),
             cycle.QR_Cuna,
+            cycle.Cradle_Code,
             cycle.CradleResult,
             cycle.PanelResult,
             cycle.InspectionPlan,

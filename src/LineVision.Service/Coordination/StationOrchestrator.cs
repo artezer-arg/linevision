@@ -221,23 +221,25 @@ public class StationOrchestrator : BackgroundService
         await _stateMachine.TriggerAsync(StationTrigger.CradleQRRead, null, ct);
         // Obtener QR leído por el punto o cámara
         var qrResult = cradleReport.Details.FirstOrDefault(d => d.ExpectedValue == "CUNA" || d.PointCode.Contains("QR"))
-            ?? new PointInspectionResult { DetectedValue = $"CUNA-{order.Modelo}-{order.Mano}-{order.Posicion}-01" };
+            ?? new PointInspectionResult { DetectedValue = "CUNA-01" };
 
         string readQR = qrResult.DetectedValue;
-        bool qrValid = await _qrService.ValidateQRAsync(readQR, context, ct);
+        string cradleCode = await _qrService.ResolveCradleCodeAsync(readQR, ct);
+        bool qrValid = await _qrService.ValidateCradleCompatibilityAsync(cradleCode, context, ct);
 
         activeCycle.QR_Cuna = readQR;
+        activeCycle.Cradle_Code = cradleCode;
         _stateMachine.AttachActiveCycle(activeCycle);
-        await _traceability.UpdateCycleStateAsync(cycleId, c => c.QR_Cuna = readQR, ct);
+        await _traceability.UpdateCycleStateAsync(cycleId, c => { c.QR_Cuna = readQR; c.Cradle_Code = cradleCode; }, ct);
 
         if (!qrValid)
         {
-            _logger.LogError("CRADLE QR NOK: Read '{QR}' does not match expected product {Model}/{Hand}/{Pos}",
-                readQR, order.Modelo, order.Mano, order.Posicion);
+            _logger.LogError("CRADLE QR NOK: Cradle '{Cradle}' (QR '{QR}') is not compatible with order {Model}/{Hand}/{Pos}",
+                cradleCode, readQR, order.Modelo, order.Mano, order.Posicion);
             activeCycle.CradleResult = "NOK";
             activeCycle.ErrorCode = "ERR_QR_MISMATCH";
             _stateMachine.AttachActiveCycle(activeCycle);
-            await _stateMachine.TriggerAsync(StationTrigger.CradleQRMismatched, "Cradle QR mismatch", ct);
+            await _stateMachine.TriggerAsync(StationTrigger.CradleQRMismatched, $"Cradle {cradleCode} mismatch", ct);
             await _traceability.UpdateCycleStateAsync(cycleId, c => { c.CradleResult = "NOK"; c.ErrorCode = "ERR_QR_MISMATCH"; }, ct);
             return false;
         }
@@ -306,13 +308,18 @@ public class StationOrchestrator : BackgroundService
         // ---------------------------------------------------------------------
         // PASO 5: OBTENER Y ENVIAR RECETA AL ROBOT (HANDSHAKE CON ECO)
         // ---------------------------------------------------------------------
-        var recipe = await _recipeService.GetRecipeAsync(_stationCode, order.Modelo, order.Mano, order.Posicion, ct);
+        string activeCradle = activeCycle.Cradle_Code ?? "CUNA-01";
+        var recipe = await _recipeService.GetRecipeAsync(_stationCode, activeCradle, order.Modelo, order.Mano, order.Posicion, ct);
         if (recipe == null)
         {
-            _logger.LogError("RECIPE NOK: No welding recipe configured for {Model}/{Hand}/{Pos}", order.Modelo, order.Mano, order.Posicion);
-            await _stateMachine.TriggerAsync(StationTrigger.RecipeEchoMismatch, "Missing recipe configuration", ct);
+            _logger.LogError("RECIPE NOK: No welding recipe configured for Cradle '{Cradle}' with Panel {Model}/{Hand}/{Pos}",
+                activeCradle, order.Modelo, order.Mano, order.Posicion);
+            await _stateMachine.TriggerAsync(StationTrigger.RecipeEchoMismatch, $"Missing recipe for Cradle {activeCradle}", ct);
             return false;
         }
+
+        _logger.LogInformation("RECIPE LOADED: Cradle '{Cradle}' determined Recipe_A={A}, Recipe_B={B} for Panel {Model}/{Hand}/{Pos}",
+            recipe.Cradle_Code, recipe.Recipe_A, recipe.Recipe_B, order.Modelo, order.Mano, order.Posicion);
 
         await _stateMachine.TriggerAsync(StationTrigger.RecipeLoaded, recipe, ct);
         await _stateMachine.TriggerAsync(StationTrigger.RecipeSent, null, ct);

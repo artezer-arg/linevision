@@ -92,6 +92,7 @@ export const App: React.FC = () => {
         stationCode="DL02"
         state={stationState}
         order={order}
+        cradleCode={cycle?.cradle_Code}
         autoRun={autoRun}
         onToggleAutoRun={handleToggleAutoRun}
         onTriggerStep={handleTriggerStep}
@@ -204,14 +205,21 @@ export const App: React.FC = () => {
                 <div>
                   <span className="text-slate-400 block font-semibold">CUNA FÍSICA:</span>
                   <span className="font-bold text-emerald-400 font-mono">
-                    {stationState === 'CHECKING_CRADLE' ? 'INSPECCIONANDO...' : 'CORRECTA (RH / FRONT)'}
+                    {cycle?.cradle_Code ? `${cycle.cradle_Code} (ASIGNADA)` : 'CUNA-01 (BASE)'}
                   </span>
                 </div>
                 <div className="h-6 w-px bg-slate-700"></div>
                 <div>
-                  <span className="text-slate-400 block font-semibold">QR CUNA:</span>
+                  <span className="text-slate-400 block font-semibold">QR ESCANEADO:</span>
                   <span className="font-bold text-cyan-400 font-mono">
-                    {cycle?.qR_Cuna || 'CUNA-P1B-RH-FRONT-01'}
+                    {cycle?.qR_Cuna || 'CUNA-01'}
+                  </span>
+                </div>
+                <div className="h-6 w-px bg-slate-700"></div>
+                <div>
+                  <span className="text-slate-400 block font-semibold">RECETA ROBOT:</span>
+                  <span className="font-bold text-yellow-400 font-mono">
+                    {cycle?.recipe_A ? `A:${cycle.recipe_A} / B:${cycle.recipe_B}` : 'PENDIENTE PASO 5'}
                   </span>
                 </div>
                 <div className="h-6 w-px bg-slate-700"></div>

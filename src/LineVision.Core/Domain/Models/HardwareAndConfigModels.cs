@@ -6,6 +6,7 @@ public class RobotRecipe
 {
     public int Recipe_ID { get; set; }
     public string StationCode { get; set; } = "DL02";
+    public string Cradle_Code { get; set; } = "CUNA-01";
     public string Modelo { get; set; } = string.Empty;
     public string Mano { get; set; } = string.Empty;
     public string Posicion { get; set; } = string.Empty;
@@ -21,6 +22,7 @@ public class RobotRecipe
 public class CradleQRMapping
 {
     public int QR_ID { get; set; }
+    public string Cradle_Code { get; set; } = "CUNA-01";
     public string QR_Pattern { get; set; } = string.Empty;
     public string Modelo { get; set; } = string.Empty;
     public string Mano { get; set; } = string.Empty;

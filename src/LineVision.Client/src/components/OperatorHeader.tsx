@@ -6,6 +6,7 @@ interface Props {
   stationCode: string;
   state: StationState;
   order: ProductionOrder | null;
+  cradleCode?: string | null;
   autoRun: boolean;
   onToggleAutoRun: () => void;
   onTriggerStep: () => void;
@@ -17,6 +18,7 @@ export const OperatorHeader: React.FC<Props> = ({
   stationCode,
   state,
   order,
+  cradleCode,
   autoRun,
   onToggleAutoRun,
   onTriggerStep,
@@ -98,6 +100,15 @@ export const OperatorHeader: React.FC<Props> = ({
             <span className="text-xs uppercase text-slate-400 font-bold tracking-widest block">POSICIÓN</span>
             <span className="text-2xl font-black text-orange-400 tracking-tight">
               {order?.posicion ? (order.posicion === 'FRONT' ? 'DELANTERA' : 'TRASERA') : '---------'}
+            </span>
+          </div>
+
+          <div className="h-10 w-px bg-slate-700"></div>
+
+          <div className="text-center min-w-[110px]">
+            <span className="text-xs uppercase text-cyan-400 font-bold tracking-widest block">CUNA / ÚTIL</span>
+            <span className="text-2xl font-black text-cyan-300 font-mono tracking-wide">
+              {cradleCode || 'CUNA-01'}
             </span>
           </div>
         </div>

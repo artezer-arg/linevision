@@ -124,9 +124,15 @@ public class CameraSimulator : ICameraProvider
         }
 
         // Synthetic QR Code Zone
-        string qrText = _activePattern.Contains("QR_INVALID") 
-            ? "CUNA-P1B-LH-REAR-01" 
-            : "CUNA-P1B-RH-FRONT-01";
+        string qrText = "CUNA-01";
+        if (_activePattern.Contains("QR_INVALID")) 
+            qrText = "CUNA-INCOMPATIBLE-99";
+        else if (_activePattern.Contains("CUNA-02")) 
+            qrText = "CUNA-02";
+        else if (_activePattern.Contains("CUNA-01")) 
+            qrText = "CUNA-01";
+        else if (_activePattern.StartsWith("CUNA-", StringComparison.OrdinalIgnoreCase)) 
+            qrText = _activePattern;
         
         Cv2.Rectangle(mat, new Rect(220, 260, 200, 120), new Scalar(255, 255, 255), -1);
         Cv2.Rectangle(mat, new Rect(225, 265, 40, 40), new Scalar(0, 0, 0), -1);

@@ -177,6 +177,7 @@ public class DatabaseService : IDatabaseService
                 CREATE TABLE IF NOT EXISTS RobotRecipe (
                     Recipe_ID INTEGER PRIMARY KEY AUTOINCREMENT,
                     StationCode TEXT NOT NULL,
+                    Cradle_Code TEXT NOT NULL DEFAULT 'CUNA-01',
                     Modelo TEXT NOT NULL,
                     Mano TEXT NOT NULL,
                     Posicion TEXT NOT NULL,
@@ -187,12 +188,13 @@ public class DatabaseService : IDatabaseService
                     CreatedAt TEXT NOT NULL,
                     UpdatedAt TEXT NOT NULL,
                     UpdatedBy TEXT NOT NULL,
-                    UNIQUE(StationCode, Modelo, Mano, Posicion, Version)
+                    UNIQUE(StationCode, Cradle_Code, Modelo, Mano, Posicion, Version)
                 );
 
                 CREATE TABLE IF NOT EXISTS CradleQR (
                     QR_ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                    QR_Pattern TEXT NOT NULL UNIQUE,
+                    Cradle_Code TEXT NOT NULL DEFAULT 'CUNA-01',
+                    QR_Pattern TEXT NOT NULL,
                     Modelo TEXT NOT NULL,
                     Mano TEXT NOT NULL,
                     Posicion TEXT NOT NULL,
@@ -276,6 +278,7 @@ public class DatabaseService : IDatabaseService
                     FechaInicio TEXT NOT NULL,
                     FechaFin TEXT,
                     QR_Cuna TEXT,
+                    Cradle_Code TEXT,
                     CradleResult TEXT,
                     PanelResult TEXT,
                     InspectionPlan TEXT,
@@ -360,6 +363,85 @@ public class DatabaseService : IDatabaseService
             ";
 
             conn.Execute(ddl);
+
+            // Migrations for existing databases to support Cradle_Code
+            try
+            {
+                var tableSql = conn.QueryFirstOrDefault<string>("SELECT sql FROM sqlite_master WHERE type='table' AND name='RobotRecipe'");
+                if (tableSql != null && !tableSql.Contains("StationCode, Cradle_Code", StringComparison.OrdinalIgnoreCase))
+                {
+                    conn.Execute(@"
+                        CREATE TABLE RobotRecipe_v2 (
+                            Recipe_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                            StationCode TEXT NOT NULL,
+                            Cradle_Code TEXT NOT NULL DEFAULT 'CUNA-01',
+                            Modelo TEXT NOT NULL,
+                            Mano TEXT NOT NULL,
+                            Posicion TEXT NOT NULL,
+                            Recipe_A INTEGER NOT NULL,
+                            Recipe_B INTEGER NOT NULL,
+                            Version INTEGER NOT NULL DEFAULT 1,
+                            Activo INTEGER NOT NULL DEFAULT 1,
+                            CreatedAt TEXT NOT NULL,
+                            UpdatedAt TEXT NOT NULL,
+                            UpdatedBy TEXT NOT NULL,
+                            UNIQUE(StationCode, Cradle_Code, Modelo, Mano, Posicion, Version)
+                        );
+                        INSERT OR IGNORE INTO RobotRecipe_v2 (Recipe_ID, StationCode, Cradle_Code, Modelo, Mano, Posicion, Recipe_A, Recipe_B, Version, Activo, CreatedAt, UpdatedAt, UpdatedBy)
+                        SELECT Recipe_ID, StationCode, 'CUNA-01', Modelo, Mano, Posicion, Recipe_A, Recipe_B, Version, Activo, CreatedAt, UpdatedAt, UpdatedBy FROM RobotRecipe;
+                        DROP TABLE RobotRecipe;
+                        ALTER TABLE RobotRecipe_v2 RENAME TO RobotRecipe;
+                    ");
+                }
+            } catch (Exception ex) {
+                _logger.LogWarning(ex, "Failed to migrate RobotRecipe table constraint");
+            }
+
+            try
+            {
+                var colsCradle = conn.Query<string>("SELECT name FROM pragma_table_info('CradleQR')").ToList();
+                if (!colsCradle.Contains("Cradle_Code", StringComparer.OrdinalIgnoreCase))
+                {
+                    conn.Execute("ALTER TABLE CradleQR ADD COLUMN Cradle_Code TEXT NOT NULL DEFAULT 'CUNA-01'");
+                }
+            } catch { }
+
+            try
+            {
+                var colsCycle = conn.Query<string>("SELECT name FROM pragma_table_info('ProductionCycle')").ToList();
+                if (!colsCycle.Contains("Cradle_Code", StringComparer.OrdinalIgnoreCase))
+                {
+                    conn.Execute("ALTER TABLE ProductionCycle ADD COLUMN Cradle_Code TEXT");
+                }
+            } catch { }
+
+            // Ensure CUNA-02 default recipes and QR codes exist for existing databases
+            try
+            {
+                int cuna02RecipeCount = conn.ExecuteScalar<int>("SELECT COUNT(1) FROM RobotRecipe WHERE Cradle_Code = 'CUNA-02'");
+                if (cuna02RecipeCount == 0)
+                {
+                    string now = DateTime.UtcNow.ToString("o");
+                    conn.Execute(@"
+                        INSERT INTO RobotRecipe (StationCode, Cradle_Code, Modelo, Mano, Posicion, Recipe_A, Recipe_B, Version, Activo, CreatedAt, UpdatedAt, UpdatedBy)
+                        VALUES 
+                        ('DL02', 'CUNA-02', 'P1B', 'RH', 'FRONT', 111, 211, 1, 1, @now, @now, 'SYSTEM'),
+                        ('DL02', 'CUNA-02', 'P1B', 'LH', 'FRONT', 112, 212, 1, 1, @now, @now, 'SYSTEM'),
+                        ('DL02', 'CUNA-02', 'P1B', 'RH', 'REAR', 113, 213, 1, 1, @now, @now, 'SYSTEM'),
+                        ('DL02', 'CUNA-02', 'P1B', 'LH', 'REAR', 114, 214, 1, 1, @now, @now, 'SYSTEM');
+
+                        INSERT INTO CradleQR (Cradle_Code, QR_Pattern, Modelo, Mano, Posicion, Variante, Activo, CreatedAt)
+                        VALUES 
+                        ('CUNA-02', 'CUNA-02', 'P1B', 'RH', 'FRONT', 'STD', 1, @now),
+                        ('CUNA-02', 'CUNA-02', 'P1B', 'LH', 'FRONT', 'STD', 1, @now),
+                        ('CUNA-02', 'CUNA-02', 'P1B', 'RH', 'REAR', 'STD', 1, @now),
+                        ('CUNA-02', 'CUNA-02', 'P1B', 'LH', 'REAR', 'STD', 1, @now);
+                    ", new { now });
+                }
+            } catch (Exception ex) {
+                _logger.LogWarning(ex, "Failed to insert CUNA-02 seed records");
+            }
+
             SeedSqliteData(conn);
         }
         catch (Exception ex)
@@ -397,19 +479,31 @@ public class DatabaseService : IDatabaseService
                 ('CYCLE_FINISHED', 3, 'Ciclo de Soldadura Completado OK'),
                 ('ERROR', 4, 'Falla en Celda o Parada de Emergencia');
 
-                INSERT INTO RobotRecipe (StationCode, Modelo, Mano, Posicion, Recipe_A, Recipe_B, Version, Activo, CreatedAt, UpdatedAt, UpdatedBy)
+                INSERT INTO RobotRecipe (StationCode, Cradle_Code, Modelo, Mano, Posicion, Recipe_A, Recipe_B, Version, Activo, CreatedAt, UpdatedAt, UpdatedBy)
                 VALUES 
-                ('DL02', 'P1B', 'RH', 'FRONT', 12, 4, 1, 1, @now, @now, 'SYSTEM'),
-                ('DL02', 'P1B', 'LH', 'FRONT', 13, 4, 1, 1, @now, @now, 'SYSTEM'),
-                ('DL02', 'P1B', 'RH', 'REAR', 21, 7, 1, 1, @now, @now, 'SYSTEM'),
-                ('DL02', 'P1B', 'LH', 'REAR', 22, 7, 1, 1, @now, @now, 'SYSTEM');
+                ('DL02', 'CUNA-01', 'P1B', 'RH', 'FRONT', 101, 201, 1, 1, @now, @now, 'SYSTEM'),
+                ('DL02', 'CUNA-01', 'P1B', 'LH', 'FRONT', 102, 202, 1, 1, @now, @now, 'SYSTEM'),
+                ('DL02', 'CUNA-01', 'P1B', 'RH', 'REAR', 103, 203, 1, 1, @now, @now, 'SYSTEM'),
+                ('DL02', 'CUNA-01', 'P1B', 'LH', 'REAR', 104, 204, 1, 1, @now, @now, 'SYSTEM'),
+                ('DL02', 'CUNA-02', 'P1B', 'RH', 'FRONT', 111, 211, 1, 1, @now, @now, 'SYSTEM'),
+                ('DL02', 'CUNA-02', 'P1B', 'LH', 'FRONT', 112, 212, 1, 1, @now, @now, 'SYSTEM'),
+                ('DL02', 'CUNA-02', 'P1B', 'RH', 'REAR', 113, 213, 1, 1, @now, @now, 'SYSTEM'),
+                ('DL02', 'CUNA-02', 'P1B', 'LH', 'REAR', 114, 214, 1, 1, @now, @now, 'SYSTEM');
 
-                INSERT INTO CradleQR (QR_Pattern, Modelo, Mano, Posicion, Variante, Activo, CreatedAt)
+                INSERT INTO CradleQR (Cradle_Code, QR_Pattern, Modelo, Mano, Posicion, Variante, Activo, CreatedAt)
                 VALUES 
-                ('CUNA-P1B-RH-FRONT-01', 'P1B', 'RH', 'FRONT', 'STD', 1, @now),
-                ('CUNA-P1B-LH-FRONT-01', 'P1B', 'LH', 'FRONT', 'STD', 1, @now),
-                ('CUNA-P1B-RH-REAR-01', 'P1B', 'RH', 'REAR', 'STD', 1, @now),
-                ('CUNA-P1B-LH-REAR-01', 'P1B', 'LH', 'REAR', 'STD', 1, @now);
+                ('CUNA-01', 'CUNA-01', 'P1B', 'RH', 'FRONT', 'STD', 1, @now),
+                ('CUNA-01', 'CUNA-01', 'P1B', 'LH', 'FRONT', 'STD', 1, @now),
+                ('CUNA-01', 'CUNA-01', 'P1B', 'RH', 'REAR', 'STD', 1, @now),
+                ('CUNA-01', 'CUNA-01', 'P1B', 'LH', 'REAR', 'STD', 1, @now),
+                ('CUNA-02', 'CUNA-02', 'P1B', 'RH', 'FRONT', 'STD', 1, @now),
+                ('CUNA-02', 'CUNA-02', 'P1B', 'LH', 'FRONT', 'STD', 1, @now),
+                ('CUNA-02', 'CUNA-02', 'P1B', 'RH', 'REAR', 'STD', 1, @now),
+                ('CUNA-02', 'CUNA-02', 'P1B', 'LH', 'REAR', 'STD', 1, @now),
+                ('CUNA-01', 'CUNA-P1B-RH-FRONT-01', 'P1B', 'RH', 'FRONT', 'STD', 1, @now),
+                ('CUNA-01', 'CUNA-P1B-LH-FRONT-01', 'P1B', 'LH', 'FRONT', 'STD', 1, @now),
+                ('CUNA-01', 'CUNA-P1B-RH-REAR-01', 'P1B', 'RH', 'REAR', 'STD', 1, @now),
+                ('CUNA-01', 'CUNA-P1B-LH-REAR-01', 'P1B', 'LH', 'REAR', 'STD', 1, @now);
 
                 INSERT INTO Camera (CameraId, Name, StationCode, ProviderType, ConnectionUri, Exposure, Gain, Fps, IsColor, Active)
                 VALUES 

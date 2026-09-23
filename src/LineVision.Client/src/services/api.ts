@@ -253,8 +253,16 @@ export const api = {
     return await res.json();
   },
 
-  async getRecipes() {
-    const res = await fetch(`${API_BASE}/api/calibration/recipes`);
+  async getRecipes(cradleCode?: string) {
+    const url = cradleCode 
+      ? `${API_BASE}/api/calibration/recipes?cradleCode=${encodeURIComponent(cradleCode)}`
+      : `${API_BASE}/api/calibration/recipes`;
+    const res = await fetch(url);
+    return await res.json();
+  },
+
+  async getCradles() {
+    const res = await fetch(`${API_BASE}/api/calibration/cradles`);
     return await res.json();
   },
 

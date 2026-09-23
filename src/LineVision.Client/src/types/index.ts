@@ -46,6 +46,7 @@ export interface ProductionCycle {
   fechaInicio: string;
   fechaFin?: string;
   qR_Cuna?: string;
+  cradle_Code?: string;
   cradleResult?: string;
   panelResult?: string;
   inspectionPlan?: string;
@@ -138,6 +139,7 @@ export interface UserSession {
 export interface RobotRecipe {
   recipe_ID?: number;
   stationCode: string;
+  cradle_Code: string;
   modelo: string;
   mano: string;
   posicion: string;
@@ -151,6 +153,7 @@ export interface RobotRecipe {
 
 export interface CradleQRMapping {
   qR_ID: number;
+  cradle_Code: string;
   qR_Pattern: string;
   modelo: string;
   mano: string;

@@ -20,7 +20,19 @@ public class CradleQRTests
     }
 
     [Fact]
-    public async Task ValidateQR_WhenMatchesExpectedContext_ShouldReturnTrue()
+    public async Task ResolveCradleCode_WhenPatternInDB_ShouldReturnCradleCode()
+    {
+        _dbMock.Setup(d => d.QuerySingleOrDefaultAsync<string>(
+            It.Is<string>(s => s.Contains("SELECT Cradle_Code FROM CradleQR")),
+            It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("CUNA-02");
+
+        var code = await _qrService.ResolveCradleCodeAsync("QR_SPECIAL_TAG");
+        code.Should().Be("CUNA-02");
+    }
+
+    [Fact]
+    public async Task ValidateCradleCompatibility_WhenMatchesDB_ShouldReturnTrue()
     {
         var context = new ProductContext
         {
@@ -29,23 +41,17 @@ public class CradleQRTests
             Posicion = "FRONT"
         };
 
-        _dbMock.Setup(d => d.QuerySingleOrDefaultAsync<CradleQRMapping>(
-            It.IsAny<string>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new CradleQRMapping
-            {
-                QR_Pattern = "CUNA-P1B-RH-FRONT-01",
-                Modelo = "P1B",
-                Mano = "RH",
-                Posicion = "FRONT",
-                Activo = true
-            });
+        _dbMock.Setup(d => d.QuerySingleOrDefaultAsync<int>(
+            It.Is<string>(s => s.Contains("FROM CradleQR")),
+            It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
 
-        bool isValid = await _qrService.ValidateQRAsync("CUNA-P1B-RH-FRONT-01", context);
+        bool isValid = await _qrService.ValidateCradleCompatibilityAsync("CUNA-01", context);
         isValid.Should().BeTrue();
     }
 
     [Fact]
-    public async Task ValidateQR_WhenHandMismatches_ShouldReturnFalse()
+    public async Task ValidateCradleCompatibility_WhenNoMappingOrRecipe_ShouldReturnFalse()
     {
         var context = new ProductContext
         {
@@ -54,19 +60,11 @@ public class CradleQRTests
             Posicion = "FRONT"
         };
 
-        // QR from an LH cradle mistakenly inserted
-        _dbMock.Setup(d => d.QuerySingleOrDefaultAsync<CradleQRMapping>(
+        _dbMock.Setup(d => d.QuerySingleOrDefaultAsync<int>(
             It.IsAny<string>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new CradleQRMapping
-            {
-                QR_Pattern = "CUNA-P1B-LH-FRONT-01",
-                Modelo = "P1B",
-                Mano = "LH", // Mismatch
-                Posicion = "FRONT",
-                Activo = true
-            });
+            .ReturnsAsync(0);
 
-        bool isValid = await _qrService.ValidateQRAsync("CUNA-P1B-LH-FRONT-01", context);
+        bool isValid = await _qrService.ValidateCradleCompatibilityAsync("CUNA-99", context);
         isValid.Should().BeFalse();
     }
 

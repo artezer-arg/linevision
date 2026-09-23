@@ -55,13 +55,17 @@ public interface IProductionOrderService
 
 public interface IRecipeService
 {
+    Task<RobotRecipe?> GetRecipeAsync(string stationCode, string cradleCode, string modelo, string mano, string posicion, CancellationToken ct = default);
     Task<RobotRecipe?> GetRecipeAsync(string stationCode, string modelo, string mano, string posicion, CancellationToken ct = default);
-    Task<IReadOnlyList<RobotRecipe>> GetAllRecipesAsync(string stationCode, CancellationToken ct = default);
+    Task<IReadOnlyList<RobotRecipe>> GetAllRecipesAsync(string stationCode, string? cradleCode = null, CancellationToken ct = default);
+    Task<IReadOnlyList<string>> GetAvailableCradlesAsync(string stationCode, CancellationToken ct = default);
     Task<bool> SaveRecipeAsync(RobotRecipe recipe, CancellationToken ct = default);
 }
 
 public interface ICradleQRService
 {
+    Task<string> ResolveCradleCodeAsync(string qrCode, CancellationToken ct = default);
+    Task<bool> ValidateCradleCompatibilityAsync(string cradleCode, ProductContext expectedContext, CancellationToken ct = default);
     Task<bool> ValidateQRAsync(string qrCode, ProductContext expectedContext, CancellationToken ct = default);
     Task<CradleQRConfig> GetConfigAsync(CancellationToken ct = default);
     Task SaveConfigAsync(CradleQRConfig config, CancellationToken ct = default);

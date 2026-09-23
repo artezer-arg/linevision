@@ -10,6 +10,7 @@ public class CalibrationController : ControllerBase
 {
     private readonly IInspectionPlanService _planService;
     private readonly IRecipeService _recipeService;
+    private readonly ICradleQRService _cradleQRService;
     private readonly IDatabaseService _db;
     private readonly ICameraManager _cameraManager;
     private readonly IEnumerable<IVisionAlgorithm> _algorithms;
@@ -18,6 +19,7 @@ public class CalibrationController : ControllerBase
     public CalibrationController(
         IInspectionPlanService planService,
         IRecipeService recipeService,
+        ICradleQRService cradleQRService,
         IDatabaseService db,
         ICameraManager cameraManager,
         IEnumerable<IVisionAlgorithm> algorithms,
@@ -25,6 +27,7 @@ public class CalibrationController : ControllerBase
     {
         _planService = planService;
         _recipeService = recipeService;
+        _cradleQRService = cradleQRService;
         _db = db;
         _cameraManager = cameraManager;
         _algorithms = algorithms;
@@ -323,10 +326,17 @@ public class CalibrationController : ControllerBase
     }
 
     [HttpGet("recipes")]
-    public async Task<IActionResult> GetRecipes()
+    public async Task<IActionResult> GetRecipes([FromQuery] string? cradleCode = null)
     {
-        var recipes = await _recipeService.GetAllRecipesAsync("DL02");
+        var recipes = await _recipeService.GetAllRecipesAsync("DL02", cradleCode);
         return Ok(recipes);
+    }
+
+    [HttpGet("cradles")]
+    public async Task<IActionResult> GetCradles()
+    {
+        var cradles = await _recipeService.GetAvailableCradlesAsync("DL02");
+        return Ok(cradles);
     }
 
     [HttpPost("recipe")]
@@ -339,7 +349,7 @@ public class CalibrationController : ControllerBase
     [HttpGet("qr-mappings")]
     public async Task<IActionResult> GetQRMappings()
     {
-        const string sql = "SELECT * FROM CradleQR ORDER BY Modelo, Mano, Posicion";
+        const string sql = "SELECT * FROM CradleQR ORDER BY Cradle_Code, Modelo, Mano, Posicion";
         var mappings = await _db.QueryAsync<CradleQRMapping>(sql);
         return Ok(mappings);
     }
@@ -347,9 +357,11 @@ public class CalibrationController : ControllerBase
     [HttpPost("qr-mapping")]
     public async Task<IActionResult> SaveQRMapping([FromBody] CradleQRMapping mapping)
     {
+        mapping.Cradle_Code = string.IsNullOrWhiteSpace(mapping.Cradle_Code) ? "CUNA-01" : mapping.Cradle_Code.Trim();
+
         const string sql = @"
-            INSERT OR REPLACE INTO CradleQR (QR_ID, QR_Pattern, Modelo, Mano, Posicion, Variante, Activo)
-            VALUES (@QR_ID, @QR_Pattern, @Modelo, @Mano, @Posicion, @Variante, @Activo)";
+            INSERT OR REPLACE INTO CradleQR (QR_ID, Cradle_Code, QR_Pattern, Modelo, Mano, Posicion, Variante, Activo)
+            VALUES (@QR_ID, @Cradle_Code, @QR_Pattern, @Modelo, @Mano, @Posicion, @Variante, @Activo)";
 
         int rows = await _db.ExecuteAsync(sql, mapping);
         return Ok(new { Success = rows > 0, Mapping = mapping });
@@ -416,16 +428,23 @@ public class CalibrationController : ControllerBase
 
             if (!string.IsNullOrEmpty(decodedText))
             {
-                const string sql = "SELECT * FROM CradleQR WHERE QR_Pattern = @decodedText AND Activo = 1";
-                var mapping = await _db.QuerySingleOrDefaultAsync<CradleQRMapping>(sql, new { decodedText });
+                string cradleCode = await _cradleQRService.ResolveCradleCodeAsync(decodedText);
+                const string sql = "SELECT * FROM CradleQR WHERE (QR_Pattern = @decodedText OR Cradle_Code = @cradleCode) AND Activo = 1";
+                var mappings = (await _db.QueryAsync<CradleQRMapping>(sql, new { decodedText, cradleCode })).ToList();
+                var mapping = mappings.FirstOrDefault(m => string.Equals(m.QR_Pattern, decodedText, StringComparison.OrdinalIgnoreCase)) ?? mappings.FirstOrDefault();
+
+                var cradleRecipes = await _recipeService.GetAllRecipesAsync("DL02", cradleCode);
 
                 return Ok(new
                 {
                     Success = true,
                     DetectedText = decodedText,
                     Confidence = 0.99,
+                    CradleCode = cradleCode,
                     Mapping = mapping,
-                    Matched = mapping != null
+                    CompatibleMappings = mappings,
+                    Recipes = cradleRecipes,
+                    Matched = mapping != null || cradleRecipes.Any()
                 });
             }
 

@@ -46,6 +46,15 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ frames }) => {
   const [points, setPoints] = useState<InspectionPoint[]>([]);
   const [recipes, setRecipes] = useState<RobotRecipe[]>([]);
   const [qrMappings, setQrMappings] = useState<CradleQRMapping[]>([]);
+  const [cradles, setCradles] = useState<string[]>(['CUNA-01', 'CUNA-02']);
+  const [selectedCradleFilter, setSelectedCradleFilter] = useState<string>('ALL');
+  const [showNewRecipeModal, setShowNewRecipeModal] = useState<boolean>(false);
+  const [newRecipeCradle, setNewRecipeCradle] = useState<string>('CUNA-01');
+  const [newRecipeModel, setNewRecipeModel] = useState<string>('P1B');
+  const [newRecipeHand, setNewRecipeHand] = useState<'RH' | 'LH'>('RH');
+  const [newRecipePos, setNewRecipePos] = useState<'FRONT' | 'REAR'>('FRONT');
+  const [newRecipeA, setNewRecipeA] = useState<number>(101);
+  const [newRecipeB, setNewRecipeB] = useState<number>(201);
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -143,14 +152,18 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ frames }) => {
   const loadAllData = async () => {
     setLoading(true);
     try {
-      const [pts, recs, qrs] = await Promise.all([
+      const [pts, recs, qrs, crds] = await Promise.all([
         api.getAllPoints().catch(() => []),
         api.getRecipes().catch(() => []),
-        api.getQRMappings().catch(() => [])
+        api.getQRMappings().catch(() => []),
+        api.getCradles().catch(() => ['CUNA-01', 'CUNA-02'])
       ]);
       setPoints(pts || []);
       setRecipes(recs || []);
       setQrMappings(qrs || []);
+      if (crds && crds.length > 0) {
+        setCradles(crds);
+      }
 
       if (qrs && qrs.length > 0) {
         const models = Array.from(new Set(qrs.map((q: any) => q.modelo))).filter(Boolean);
@@ -315,6 +328,7 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ frames }) => {
     if (!scannedQR?.text) return;
     const newMapping: CradleQRMapping = {
       qR_ID: 0,
+      cradle_Code: scannedQR.mapping?.cradle_Code || (scannedQR.text.includes('02') ? 'CUNA-02' : 'CUNA-01'),
       qR_Pattern: scannedQR.text,
       modelo,
       mano,
@@ -706,9 +720,37 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ frames }) => {
     setSaving(true);
     try {
       await api.saveRecipe(recipe);
-      showFeedback('success', `Receta para ${recipe.modelo} ${recipe.mano} ${recipe.posicion} guardada`);
+      showFeedback('success', `Receta para Cuna ${recipe.cradle_Code || 'CUNA-01'} (${recipe.modelo} ${recipe.mano} ${recipe.posicion}) guardada`);
     } catch (err) {
       showFeedback('error', 'Error al guardar receta');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCreateRecipe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const crdCode = newRecipeCradle.trim().toUpperCase() || 'CUNA-01';
+      const newRec: RobotRecipe = {
+        stationCode: 'DL02',
+        cradle_Code: crdCode,
+        modelo: newRecipeModel,
+        mano: newRecipeHand,
+        posicion: newRecipePos,
+        recipe_A: newRecipeA,
+        recipe_B: newRecipeB,
+        version: 1,
+        activo: true
+      };
+      await api.saveRecipe(newRec);
+      await loadAllData();
+      setShowNewRecipeModal(false);
+      showFeedback('success', `Receta para Cuna ${crdCode} (${newRec.modelo} ${newRec.mano} ${newRec.posicion}) creada exitosamente`);
+    } catch (err) {
+      console.error(err);
+      showFeedback('error', 'Error al guardar nueva receta');
     } finally {
       setSaving(false);
     }
@@ -1954,6 +1996,7 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ frames }) => {
                 <table className="w-full text-xs text-left">
                   <thead className="bg-slate-900 text-slate-400 uppercase font-mono text-[11px]">
                     <tr>
+                      <th className="p-2.5">Cuna</th>
                       <th className="p-2.5">Patrón QR Esperado</th>
                       <th className="p-2.5">Modelo</th>
                       <th className="p-2.5">Mano</th>
@@ -1978,6 +2021,15 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ frames }) => {
                               : 'hover:bg-slate-800/40'
                           }`}
                         >
+                          <td className="p-2.5">
+                            <input
+                              type="text"
+                              value={qr.cradle_Code || 'CUNA-01'}
+                              onChange={e => handleUpdateQR(idx, 'cradle_Code', e.target.value.toUpperCase())}
+                              className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-yellow-300 font-mono font-bold w-20"
+                              placeholder="CUNA-01"
+                            />
+                          </td>
                           <td className="p-2.5 font-mono font-bold text-cyan-300">
                             <input
                               type="text"
@@ -2052,26 +2104,80 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ frames }) => {
       {/* VIEW 3: STEP 5 - RECIPES CONFIGURATION */}
       {activeStepTab === 'RECIPES' && (
         <div className="bg-industrial-card border border-industrial-border rounded-xl p-6 space-y-4">
-          <div className="flex items-center justify-between border-b border-industrial-border pb-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-industrial-border pb-4 gap-3">
             <div className="flex items-center space-x-3">
               <div className="p-2.5 bg-emerald-950 border border-emerald-700 rounded-xl text-emerald-400">
                 <Cpu className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-sm font-black text-white uppercase">
-                  Paso 5: Mapeo de Recetas de Soldadura Robot & Handshake PLC
+                <h3 className="text-sm font-black text-white uppercase flex items-center space-x-2">
+                  <span>Paso 5: Mapeo de Recetas de Soldadura Robot & Handshake PLC</span>
+                  <span className="px-2 py-0.5 bg-cyan-900/60 text-cyan-300 text-[10px] font-mono rounded border border-cyan-700">
+                    INDEXADO POR CUNA
+                  </span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Parámetros numéricos enviados al PLC y Robot cuando todas las inspecciones ópticas resultan OK. El PLC devuelve un eco para confirmar antes de arrancar soldadura.
+                  La <strong>Cuna física</strong> determina la receta de soldadura enviada al PLC y Robot. Un mismo panel puede ir en distintas cunas con recetas diferenciadas.
                 </p>
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setShowNewRecipeModal(true)}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-black flex items-center space-x-1.5 shadow-lg transition self-start md:self-center"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ Nueva Receta Cuna-Panel</span>
+            </button>
+          </div>
+
+          {/* Filter Bar by Cradle */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/70 p-3 rounded-xl border border-slate-800">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Filtrar por Cuna:</span>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectedCradleFilter('ALL')}
+                  className={`px-3 py-1 rounded text-xs font-bold transition ${
+                    selectedCradleFilter === 'ALL'
+                      ? 'bg-blue-600 text-white shadow'
+                      : 'bg-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Todas ({recipes.length})
+                </button>
+                {cradles.map(c => {
+                  const count = recipes.filter(r => (r.cradle_Code || 'CUNA-01') === c).length;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setSelectedCradleFilter(c)}
+                      className={`px-3 py-1 rounded text-xs font-bold transition font-mono ${
+                        selectedCradleFilter === c
+                          ? 'bg-emerald-600 text-white shadow'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {c} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <span className="text-[11px] text-slate-400 font-mono">
+              Mostrando {recipes.filter(r => selectedCradleFilter === 'ALL' || (r.cradle_Code || 'CUNA-01') === selectedCradleFilter).length} recetas
+            </span>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead className="bg-slate-900 text-slate-400 uppercase font-mono text-[11px]">
                 <tr>
+                  <th className="p-3">Cuna (Útil Físico)</th>
                   <th className="p-3">Modelo</th>
                   <th className="p-3">Mano</th>
                   <th className="p-3">Posición</th>
@@ -2082,48 +2188,62 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ frames }) => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {recipes.map((rec, idx) => (
-                  <tr key={rec.recipe_ID || idx} className="hover:bg-slate-800/40">
-                    <td className="p-3 font-mono font-bold text-white">{rec.modelo}</td>
-                    <td className="p-3 font-mono text-cyan-400 font-bold">{rec.mano}</td>
-                    <td className="p-3 font-mono text-purple-400 font-bold">{rec.posicion}</td>
-                    <td className="p-3">
-                      <input
-                        type="number"
-                        value={rec.recipe_A}
-                        onChange={e => handleUpdateRecipe(idx, 'recipe_A', parseInt(e.target.value) || 0)}
-                        className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-emerald-300 font-mono font-bold w-24"
-                      />
-                    </td>
-                    <td className="p-3">
-                      <input
-                        type="number"
-                        value={rec.recipe_B}
-                        onChange={e => handleUpdateRecipe(idx, 'recipe_B', parseInt(e.target.value) || 0)}
-                        className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-emerald-300 font-mono font-bold w-24"
-                      />
-                    </td>
-                    <td className="p-3">
-                      <button
-                        onClick={() => handleUpdateRecipe(idx, 'activo', !rec.activo)}
-                        className={`px-2 py-1 rounded text-[10px] font-black font-mono ${
-                          rec.activo ? 'bg-emerald-900/60 text-emerald-300 border border-emerald-500' : 'bg-slate-800 text-slate-500'
-                        }`}
-                      >
-                        {rec.activo ? 'ACTIVA' : 'INACTIVA'}
-                      </button>
-                    </td>
-                    <td className="p-3 text-right">
-                      <button
-                        onClick={() => handleSaveRecipe(rec)}
-                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold transition flex items-center space-x-1 ml-auto"
-                      >
-                        <Save className="w-3.5 h-3.5" />
-                        <span>Guardar</span>
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {recipes
+                  .filter(rec => selectedCradleFilter === 'ALL' || (rec.cradle_Code || 'CUNA-01') === selectedCradleFilter)
+                  .map((rec, idx) => {
+                    const originalIndex = recipes.findIndex(r => r === rec);
+                    return (
+                      <tr key={rec.recipe_ID || idx} className="hover:bg-slate-800/40">
+                        <td className="p-3">
+                          <input
+                            type="text"
+                            value={rec.cradle_Code || 'CUNA-01'}
+                            onChange={e => handleUpdateRecipe(originalIndex, 'cradle_Code', e.target.value.toUpperCase())}
+                            className="bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-yellow-300 font-mono font-bold w-24"
+                            placeholder="CUNA-01"
+                          />
+                        </td>
+                        <td className="p-3 font-mono font-bold text-white">{rec.modelo}</td>
+                        <td className="p-3 font-mono text-cyan-400 font-bold">{rec.mano}</td>
+                        <td className="p-3 font-mono text-purple-400 font-bold">{rec.posicion}</td>
+                        <td className="p-3">
+                          <input
+                            type="number"
+                            value={rec.recipe_A}
+                            onChange={e => handleUpdateRecipe(originalIndex, 'recipe_A', parseInt(e.target.value) || 0)}
+                            className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-emerald-300 font-mono font-bold w-24"
+                          />
+                        </td>
+                        <td className="p-3">
+                          <input
+                            type="number"
+                            value={rec.recipe_B}
+                            onChange={e => handleUpdateRecipe(originalIndex, 'recipe_B', parseInt(e.target.value) || 0)}
+                            className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-emerald-300 font-mono font-bold w-24"
+                          />
+                        </td>
+                        <td className="p-3">
+                          <button
+                            onClick={() => handleUpdateRecipe(originalIndex, 'activo', !rec.activo)}
+                            className={`px-2 py-1 rounded text-[10px] font-black font-mono ${
+                              rec.activo ? 'bg-emerald-900/60 text-emerald-300 border border-emerald-500' : 'bg-slate-800 text-slate-500'
+                            }`}
+                          >
+                            {rec.activo ? 'ACTIVA' : 'INACTIVA'}
+                          </button>
+                        </td>
+                        <td className="p-3 text-right">
+                          <button
+                            onClick={() => handleSaveRecipe(rec)}
+                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold transition flex items-center space-x-1 ml-auto"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            <span>Guardar</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>
@@ -2468,6 +2588,127 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ frames }) => {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* MODAL: CREATE NEW RECIPE (CRADLE + PANEL) */}
+      {showNewRecipeModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 animate-fade-in">
+          <form onSubmit={handleCreateRecipe} className="bg-industrial-card border border-industrial-border rounded-xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center space-x-3 border-b border-industrial-border pb-3">
+              <div className="p-2 bg-emerald-950 rounded-lg text-emerald-400">
+                <Cpu className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-sm text-white uppercase">Nueva Receta de Soldadura</h3>
+                <span className="text-xs text-slate-400 font-mono">Asociación Cuna Física &bull; Panel de Puerta</span>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-slate-400 font-bold block mb-1">Cuna Física (Útil de Montaje):</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    value={newRecipeCradle}
+                    onChange={e => setNewRecipeCradle(e.target.value.toUpperCase())}
+                    placeholder="CUNA-01"
+                    className="flex-1 bg-industrial-dark border border-industrial-border rounded-lg p-2 text-yellow-300 font-mono font-bold uppercase focus:border-blue-500 focus:outline-none"
+                  />
+                  <select
+                    value={cradles.includes(newRecipeCradle) ? newRecipeCradle : ''}
+                    onChange={e => { if (e.target.value) setNewRecipeCradle(e.target.value); }}
+                    className="bg-industrial-dark border border-industrial-border rounded-lg px-2 text-slate-300 font-mono"
+                  >
+                    <option value="">Existentes...</option>
+                    {cradles.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-slate-400 font-bold block mb-1">Modelo:</label>
+                  <input
+                    type="text"
+                    required
+                    value={newRecipeModel}
+                    onChange={e => setNewRecipeModel(e.target.value.toUpperCase())}
+                    className="w-full bg-industrial-dark border border-industrial-border rounded-lg p-2 text-white font-mono uppercase focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 font-bold block mb-1">Mano:</label>
+                  <select
+                    value={newRecipeHand}
+                    onChange={e => setNewRecipeHand(e.target.value as 'RH' | 'LH')}
+                    className="w-full bg-industrial-dark border border-industrial-border rounded-lg p-2 text-cyan-400 font-mono font-bold focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="RH">RH (Der)</option>
+                    <option value="LH">LH (Izq)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-slate-400 font-bold block mb-1">Posición:</label>
+                  <select
+                    value={newRecipePos}
+                    onChange={e => setNewRecipePos(e.target.value as 'FRONT' | 'REAR')}
+                    className="w-full bg-industrial-dark border border-industrial-border rounded-lg p-2 text-purple-400 font-mono font-bold focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="FRONT">FRONT</option>
+                    <option value="REAR">REAR</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="text-slate-400 font-bold block mb-1">Receta A (PLC Tag):</label>
+                  <input
+                    type="number"
+                    required
+                    value={newRecipeA}
+                    onChange={e => setNewRecipeA(parseInt(e.target.value) || 0)}
+                    className="w-full bg-industrial-dark border border-industrial-border rounded-lg p-2 text-emerald-400 font-mono font-black focus:border-blue-500 focus:outline-none text-base"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 font-bold block mb-1">Receta B (Robot Prog):</label>
+                  <input
+                    type="number"
+                    required
+                    value={newRecipeB}
+                    onChange={e => setNewRecipeB(parseInt(e.target.value) || 0)}
+                    className="w-full bg-industrial-dark border border-industrial-border rounded-lg p-2 text-emerald-400 font-mono font-black focus:border-blue-500 focus:outline-none text-base"
+                  />
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-blue-950/40 border border-blue-900 rounded-lg text-[11px] text-slate-300">
+                Esta receta se transmitirá al PLC cuando la cámara detecte la cuna <strong className="text-yellow-300">{newRecipeCradle}</strong> con la orden <strong className="text-white">{newRecipeModel} {newRecipeHand} {newRecipePos}</strong>.
+              </div>
+            </div>
+
+            <div className="flex space-x-2 pt-2 border-t border-industrial-border">
+              <button
+                type="button"
+                onClick={() => setShowNewRecipeModal(false)}
+                className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold text-slate-300"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 rounded-lg text-xs font-black text-white flex items-center justify-center space-x-1.5 shadow-lg"
+              >
+                {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                <span>Crear Receta</span>
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>
