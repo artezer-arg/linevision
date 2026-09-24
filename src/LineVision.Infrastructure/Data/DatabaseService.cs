@@ -423,14 +423,14 @@ public class DatabaseService : IDatabaseService
                 {
                     string now = DateTime.UtcNow.ToString("o");
                     conn.Execute(@"
-                        INSERT INTO RobotRecipe (StationCode, Cradle_Code, Modelo, Mano, Posicion, Recipe_A, Recipe_B, Version, Activo, CreatedAt, UpdatedAt, UpdatedBy)
+                        INSERT OR IGNORE INTO RobotRecipe (StationCode, Cradle_Code, Modelo, Mano, Posicion, Recipe_A, Recipe_B, Version, Activo, CreatedAt, UpdatedAt, UpdatedBy)
                         VALUES 
                         ('DL02', 'CUNA-02', 'P1B', 'RH', 'FRONT', 111, 211, 1, 1, @now, @now, 'SYSTEM'),
                         ('DL02', 'CUNA-02', 'P1B', 'LH', 'FRONT', 112, 212, 1, 1, @now, @now, 'SYSTEM'),
                         ('DL02', 'CUNA-02', 'P1B', 'RH', 'REAR', 113, 213, 1, 1, @now, @now, 'SYSTEM'),
                         ('DL02', 'CUNA-02', 'P1B', 'LH', 'REAR', 114, 214, 1, 1, @now, @now, 'SYSTEM');
 
-                        INSERT INTO CradleQR (Cradle_Code, QR_Pattern, Modelo, Mano, Posicion, Variante, Activo, CreatedAt)
+                        INSERT OR IGNORE INTO CradleQR (Cradle_Code, QR_Pattern, Modelo, Mano, Posicion, Variante, Activo, CreatedAt)
                         VALUES 
                         ('CUNA-02', 'CUNA-02', 'P1B', 'RH', 'FRONT', 'STD', 1, @now),
                         ('CUNA-02', 'CUNA-02', 'P1B', 'LH', 'FRONT', 'STD', 1, @now),

@@ -35,3 +35,4 @@ $RECYCLE.BIN/
 /publish/
 /dist/
 *.zip
+!LineVision_DL02_Portable.zip
