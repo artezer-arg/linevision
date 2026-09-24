@@ -162,8 +162,60 @@ public interface IAuthenticationService
     Task<bool> HasPermissionAsync(string username, string permission, CancellationToken ct = default);
 }
 
+public class DatabaseConnectionConfig
+{
+    public string Provider { get; set; } = "Sqlite"; // "Sqlite" | "SqlServer"
+    public string ConnectionString { get; set; } = "Data Source=LineVision_DL02.db";
+    public string? Server { get; set; } = "localhost";
+    public int Port { get; set; } = 1433;
+    public string? DatabaseName { get; set; } = "LineVision_DL02";
+    public string? Username { get; set; } = "sa";
+    public string? Password { get; set; } = string.Empty;
+    public bool IntegratedSecurity { get; set; } = false;
+    public bool TrustServerCertificate { get; set; } = true;
+    public int ConnectionTimeout { get; set; } = 15;
+}
+
+public class DatabaseTestResult
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public string Provider { get; set; } = string.Empty;
+    public string? DatabaseVersion { get; set; }
+    public long ResponseTimeMs { get; set; }
+    public List<string> ExistingTables { get; set; } = new();
+    public int TableCount => ExistingTables.Count;
+}
+
+public class DatabaseMigrationResult
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public List<string> TablesCreatedOrVerified { get; set; } = new();
+    public List<string> ColumnsAdded { get; set; } = new();
+    public List<string> SeedRecordsInserted { get; set; } = new();
+    public List<string> Warnings { get; set; } = new();
+}
+
+public class DatabaseTableInfo
+{
+    public string TableName { get; set; } = string.Empty;
+    public long RowCount { get; set; }
+    public bool Exists { get; set; } = true;
+    public string? Description { get; set; }
+}
+
 public interface IDatabaseService
 {
+    string CurrentProvider { get; }
+    string CurrentConnectionString { get; }
+    DatabaseConnectionConfig GetConfiguration();
+    Task<bool> UpdateConfigurationAsync(DatabaseConnectionConfig config, CancellationToken ct = default);
+    Task<DatabaseTestResult> TestConnectionAsync(DatabaseConnectionConfig? config = null, CancellationToken ct = default);
+    Task<DatabaseMigrationResult> InitializeOrUpdateSchemaAsync(bool seedDataIfEmpty = true, CancellationToken ct = default);
+    string GenerateIdempotentSqlScript(string targetProvider = "SqlServer");
+    Task<IReadOnlyList<DatabaseTableInfo>> GetTablesAsync(CancellationToken ct = default);
+
     Task<T?> QuerySingleOrDefaultAsync<T>(string sql, object? param = null, CancellationToken ct = default);
     Task<IEnumerable<T>> QueryAsync<T>(string sql, object? param = null, CancellationToken ct = default);
     Task<int> ExecuteAsync(string sql, object? param = null, CancellationToken ct = default);

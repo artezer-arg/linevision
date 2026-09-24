@@ -412,5 +412,46 @@ export const api = {
       body: JSON.stringify({ state, echoA, echoB })
     });
     return await res.json();
+  },
+
+  // DATABASE CONFIGURATION & SAFE IDEMPOTENT MIGRATIONS
+  async getDatabaseConfig() {
+    const res = await fetch(`${API_BASE}/api/database/config`);
+    return await res.json();
+  },
+
+  async updateDatabaseConfig(config: any) {
+    const res = await fetch(`${API_BASE}/api/database/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    return await res.json();
+  },
+
+  async testDatabaseConnection(config?: any) {
+    const res = await fetch(`${API_BASE}/api/database/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config || null)
+    });
+    return await res.json();
+  },
+
+  async runDatabaseMigration(seedData: boolean = true) {
+    const res = await fetch(`${API_BASE}/api/database/migrate?seedData=${seedData}`, {
+      method: 'POST'
+    });
+    return await res.json();
+  },
+
+  async getDatabaseTables() {
+    const res = await fetch(`${API_BASE}/api/database/tables`);
+    return await res.json();
+  },
+
+  async getDatabaseSqlScript(provider: string = 'SqlServer') {
+    const res = await fetch(`${API_BASE}/api/database/script?provider=${encodeURIComponent(provider)}`);
+    return await res.json();
   }
 };

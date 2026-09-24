@@ -10,7 +10,8 @@ import { MaintenanceView } from './components/MaintenanceView';
 import { HistoryView } from './components/HistoryView';
 import { CalibrationView } from './components/CalibrationView';
 import { PLCCommunicationView } from './components/PLCCommunicationView';
-import { Monitor, Cpu, Sliders, Wrench, History, UserCheck, Shield, Crosshair, Radio } from 'lucide-react';
+import { DatabaseConfigView } from './components/DatabaseConfigView';
+import { Monitor, Cpu, Sliders, Wrench, History, UserCheck, Shield, Crosshair, Radio, Database } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [stationState, setStationState] = useState<StationState>('WAITING_ORDER');
@@ -19,7 +20,7 @@ export const App: React.FC = () => {
   const [frames, setFrames] = useState<Record<string, string>>({});
   const [health, setHealth] = useState<StationHealthStatus | null>(null);
   const [autoRun, setAutoRun] = useState(true);
-  const [activeTab, setActiveTab] = useState<'OPERATOR' | 'CALIBRATION' | 'PLC_COMM' | 'TECHNICAL' | 'SIMULATORS' | 'MAINTENANCE' | 'HISTORY'>('OPERATOR');
+  const [activeTab, setActiveTab] = useState<'OPERATOR' | 'CALIBRATION' | 'PLC_COMM' | 'DATABASE' | 'TECHNICAL' | 'SIMULATORS' | 'MAINTENANCE' | 'HISTORY'>('OPERATOR');
   const [user, setUser] = useState<UserSession>({
     username: 'operator',
     displayName: 'Operador Turno Mañana',
@@ -137,6 +138,16 @@ export const App: React.FC = () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('DATABASE')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center space-x-2 transition ${
+              activeTab === 'DATABASE' ? 'bg-emerald-600 text-white shadow-md font-black ring-2 ring-emerald-400/40' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <Database className="w-4 h-4 text-emerald-400" />
+            <span>Base de Datos</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('TECHNICAL')}
             className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center space-x-2 transition ${
               activeTab === 'TECHNICAL' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
@@ -241,6 +252,7 @@ export const App: React.FC = () => {
         )}
         {activeTab === 'CALIBRATION' && <CalibrationView frames={frames} />}
         {activeTab === 'PLC_COMM' && <PLCCommunicationView />}
+        {activeTab === 'DATABASE' && <DatabaseConfigView />}
         {activeTab === 'TECHNICAL' && <TechnicalView health={health} state={stationState} cycle={cycle} />}
         {activeTab === 'SIMULATORS' && <SimulatorsView />}
         {activeTab === 'MAINTENANCE' && (

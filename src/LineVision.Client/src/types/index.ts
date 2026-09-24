@@ -231,3 +231,48 @@ export interface HandshakeTestResult {
   message: string;
   durationMs: number;
 }
+
+export interface DatabaseConnectionConfig {
+  provider: 'Sqlite' | 'SqlServer';
+  connectionString: string;
+  server?: string;
+  port?: number;
+  databaseName?: string;
+  username?: string;
+  password?: string;
+  integratedSecurity?: boolean;
+  trustServerCertificate?: boolean;
+  connectionTimeout?: number;
+}
+
+export interface DatabaseTestResult {
+  success: boolean;
+  message: string;
+  provider: string;
+  databaseVersion?: string;
+  responseTimeMs: number;
+  existingTables: string[];
+  tableCount: number;
+}
+
+export interface DatabaseMigrationResult {
+  success: boolean;
+  message: string;
+  tablesCreatedOrVerified: string[];
+  columnsAdded: string[];
+  seedRecordsInserted: string[];
+  warnings: string[];
+}
+
+export interface DatabaseTableInfo {
+  tableName: string;
+  rowCount: number;
+  exists: boolean;
+  description?: string;
+}
+
+export interface SqlScriptInfo {
+  provider: string;
+  filename: string;
+  content: string;
+}

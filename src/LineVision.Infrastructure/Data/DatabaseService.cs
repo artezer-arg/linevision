@@ -11,51 +11,412 @@ namespace LineVision.Infrastructure.Data;
 
 public class DatabaseService : IDatabaseService
 {
-    private readonly string _connectionString;
-    private readonly string _providerName; // "SqlServer" or "Sqlite"
+    private volatile string _connectionString;
+    private volatile string _providerName; // "SqlServer" or "Sqlite"
     private readonly ILogger<DatabaseService> _logger;
+    private readonly IConfiguration _config;
+    private readonly object _lock = new();
+
+    public string CurrentProvider => _providerName;
+    public string CurrentConnectionString => _connectionString;
 
     public DatabaseService(IConfiguration config, ILogger<DatabaseService> logger)
     {
         _logger = logger;
+        _config = config;
         _providerName = config["Database:Provider"] ?? "Sqlite";
         _connectionString = config.GetConnectionString("DefaultConnection") 
             ?? "Data Source=LineVision_DL02.db";
         
+        LoadPersistedConfig();
+
         SqlMapper.AddTypeHandler(new GuidTypeHandler());
         EnsureInitialized();
     }
 
+    private void LoadPersistedConfig()
+    {
+        try
+        {
+            var configPath = GetConfigFilePath();
+            if (File.Exists(configPath))
+            {
+                var json = File.ReadAllText(configPath);
+                var saved = System.Text.Json.JsonSerializer.Deserialize<DatabaseConnectionConfig>(json);
+                if (saved != null && !string.IsNullOrWhiteSpace(saved.Provider) && !string.IsNullOrWhiteSpace(saved.ConnectionString))
+                {
+                    _providerName = saved.Provider;
+                    _connectionString = saved.ConnectionString;
+                    _logger.LogInformation("Loaded persisted database config: Provider={Provider}, ConnectionString={ConnStr}",
+                        _providerName, MaskConnectionString(_connectionString));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not load persisted database config");
+        }
+    }
+
+    private static string GetConfigFilePath()
+    {
+        return Path.Combine(AppContext.BaseDirectory, "db_connection_config.json");
+    }
+
+    public static string MaskConnectionString(string connStr)
+    {
+        if (string.IsNullOrEmpty(connStr)) return string.Empty;
+        return System.Text.RegularExpressions.Regex.Replace(connStr, "(Password|pwd)=[^;]+", "$1=••••••••", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
     public IDbConnection CreateConnection()
     {
-        if (string.Equals(_providerName, "SqlServer", StringComparison.OrdinalIgnoreCase))
+        return CreateConnection(_providerName, _connectionString);
+    }
+
+    public IDbConnection CreateConnection(string provider, string connectionString)
+    {
+        if (string.Equals(provider, "SqlServer", StringComparison.OrdinalIgnoreCase))
         {
-            return new SqlConnection(_connectionString);
+            return new SqlConnection(connectionString);
         }
         else
         {
-            return new SqliteConnection(_connectionString);
+            return new SqliteConnection(connectionString);
         }
+    }
+
+    public DatabaseConnectionConfig GetConfiguration()
+    {
+        var cfg = new DatabaseConnectionConfig
+        {
+            Provider = _providerName,
+            ConnectionString = _connectionString
+        };
+
+        try
+        {
+            if (string.Equals(_providerName, "SqlServer", StringComparison.OrdinalIgnoreCase))
+            {
+                var builder = new SqlConnectionStringBuilder(_connectionString);
+                var parts = builder.DataSource.Split(',');
+                cfg.Server = parts[0];
+                cfg.Port = parts.Length > 1 && int.TryParse(parts[1], out int p) ? p : 1433;
+                cfg.DatabaseName = builder.InitialCatalog;
+                cfg.IntegratedSecurity = builder.IntegratedSecurity;
+                cfg.Username = builder.UserID;
+                cfg.Password = string.IsNullOrEmpty(builder.Password) ? string.Empty : "••••••••";
+                cfg.TrustServerCertificate = builder.TrustServerCertificate;
+                cfg.ConnectionTimeout = builder.ConnectTimeout;
+            }
+            else
+            {
+                var builder = new SqliteConnectionStringBuilder(_connectionString);
+                cfg.DatabaseName = builder.DataSource;
+                cfg.Server = "Local File";
+            }
+        }
+        catch
+        {
+            // raw ConnectionString is preserved
+        }
+
+        return cfg;
+    }
+
+    public static string BuildConnectionString(DatabaseConnectionConfig config)
+    {
+        if (string.Equals(config.Provider, "SqlServer", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.IsNullOrWhiteSpace(config.Server) && !string.IsNullOrWhiteSpace(config.DatabaseName))
+            {
+                var builder = new SqlConnectionStringBuilder();
+                builder.DataSource = config.Port > 0 && config.Port != 1433
+                    ? $"{config.Server},{config.Port}"
+                    : config.Server;
+                builder.InitialCatalog = config.DatabaseName;
+                builder.IntegratedSecurity = config.IntegratedSecurity;
+                if (!config.IntegratedSecurity)
+                {
+                    builder.UserID = config.Username ?? "sa";
+                    builder.Password = config.Password ?? string.Empty;
+                }
+                builder.TrustServerCertificate = config.TrustServerCertificate;
+                builder.ConnectTimeout = config.ConnectionTimeout > 0 ? config.ConnectionTimeout : 15;
+                return builder.ConnectionString;
+            }
+            return string.IsNullOrWhiteSpace(config.ConnectionString) 
+                ? "Server=localhost;Database=LineVision_DL02;Integrated Security=true;TrustServerCertificate=true;"
+                : config.ConnectionString;
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(config.DatabaseName) && !config.DatabaseName.StartsWith("Data Source="))
+            {
+                return $"Data Source={config.DatabaseName}";
+            }
+            return string.IsNullOrWhiteSpace(config.ConnectionString)
+                ? "Data Source=LineVision_DL02.db"
+                : config.ConnectionString;
+        }
+    }
+
+    public async Task<bool> UpdateConfigurationAsync(DatabaseConnectionConfig config, CancellationToken ct = default)
+    {
+        if (config == null) throw new ArgumentNullException(nameof(config));
+
+        string targetProvider = string.Equals(config.Provider, "SqlServer", StringComparison.OrdinalIgnoreCase)
+            ? "SqlServer"
+            : "Sqlite";
+        
+        string targetConnStr = BuildConnectionString(config);
+
+        // Verify connection before applying
+        var test = await TestConnectionAsync(new DatabaseConnectionConfig
+        {
+            Provider = targetProvider,
+            ConnectionString = targetConnStr
+        }, ct);
+
+        if (!test.Success)
+        {
+            _logger.LogError("Cannot apply database config. Test failed: {Msg}", test.Message);
+            return false;
+        }
+
+        lock (_lock)
+        {
+            _providerName = targetProvider;
+            _connectionString = targetConnStr;
+        }
+
+        // Persist to json
+        try
+        {
+            var savedConfig = new DatabaseConnectionConfig
+            {
+                Provider = targetProvider,
+                ConnectionString = targetConnStr,
+                Server = config.Server,
+                Port = config.Port,
+                DatabaseName = config.DatabaseName,
+                Username = config.Username,
+                Password = config.Password,
+                IntegratedSecurity = config.IntegratedSecurity,
+                TrustServerCertificate = config.TrustServerCertificate,
+                ConnectionTimeout = config.ConnectionTimeout
+            };
+            var json = System.Text.Json.JsonSerializer.Serialize(savedConfig, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(GetConfigFilePath(), json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist database config file");
+        }
+
+        _logger.LogInformation("Database connection updated successfully to {Provider} ({Conn})", targetProvider, MaskConnectionString(targetConnStr));
+
+        // Safely verify or initialize tables on the new database without deleting anything
+        await InitializeOrUpdateSchemaAsync(seedDataIfEmpty: true, ct);
+
+        return true;
+    }
+
+    public async Task<DatabaseTestResult> TestConnectionAsync(DatabaseConnectionConfig? config = null, CancellationToken ct = default)
+    {
+        var targetProvider = config?.Provider ?? _providerName;
+        var targetConnStr = config != null ? BuildConnectionString(config) : _connectionString;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        try
+        {
+            using var conn = CreateConnection(targetProvider, targetConnStr);
+            if (conn is DbConnection dbConn)
+            {
+                await dbConn.OpenAsync(ct);
+            }
+            else
+            {
+                conn.Open();
+            }
+
+            string version = "Unknown";
+            var tables = new List<string>();
+
+            if (string.Equals(targetProvider, "SqlServer", StringComparison.OrdinalIgnoreCase))
+            {
+                version = await conn.ExecuteScalarAsync<string>(new CommandDefinition("SELECT @@VERSION", cancellationToken: ct)) ?? "Microsoft SQL Server";
+                var t = await conn.QueryAsync<string>(
+                    new CommandDefinition("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME", cancellationToken: ct));
+                tables.AddRange(t);
+            }
+            else
+            {
+                version = await conn.ExecuteScalarAsync<string>(new CommandDefinition("SELECT sqlite_version()", cancellationToken: ct)) ?? "SQLite";
+                version = "SQLite v" + version;
+                var t = await conn.QueryAsync<string>(
+                    new CommandDefinition("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name", cancellationToken: ct));
+                tables.AddRange(t);
+            }
+
+            sw.Stop();
+            return new DatabaseTestResult
+            {
+                Success = true,
+                Message = $"Conexión exitosa a {targetProvider}. ({tables.Count} tablas encontradas)",
+                Provider = targetProvider,
+                DatabaseVersion = version.Split('\n')[0].Trim(),
+                ResponseTimeMs = sw.ElapsedMilliseconds,
+                ExistingTables = tables
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return new DatabaseTestResult
+            {
+                Success = false,
+                Message = $"Fallo de conexión a {targetProvider}: {ex.Message}",
+                Provider = targetProvider,
+                ResponseTimeMs = sw.ElapsedMilliseconds,
+                ExistingTables = new List<string>()
+            };
+        }
+    }
+
+    public async Task<IReadOnlyList<DatabaseTableInfo>> GetTablesAsync(CancellationToken ct = default)
+    {
+        var result = new List<DatabaseTableInfo>();
+        try
+        {
+            using var conn = CreateConnection();
+            if (conn is DbConnection dbConn) await dbConn.OpenAsync(ct);
+            else conn.Open();
+
+            if (string.Equals(_providerName, "SqlServer", StringComparison.OrdinalIgnoreCase))
+            {
+                var rows = await conn.QueryAsync<dynamic>(new CommandDefinition(@"
+                    SELECT t.name AS TableName, SUM(p.rows) AS [RowCount]
+                    FROM sys.tables t
+                    LEFT JOIN sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0,1)
+                    GROUP BY t.name
+                    ORDER BY t.name", cancellationToken: ct));
+
+                foreach (var r in rows)
+                {
+                    result.Add(new DatabaseTableInfo
+                    {
+                        TableName = (string)r.TableName,
+                        RowCount = Convert.ToInt64(r.RowCount ?? 0),
+                        Exists = true
+                    });
+                }
+            }
+            else
+            {
+                var tables = (await conn.QueryAsync<string>(
+                    new CommandDefinition("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name", cancellationToken: ct))).ToList();
+
+                foreach (var tbl in tables)
+                {
+                    long count = 0;
+                    try {
+                        count = await conn.ExecuteScalarAsync<long>(new CommandDefinition($"SELECT COUNT(1) FROM [{tbl}]", cancellationToken: ct));
+                    } catch { }
+                    result.Add(new DatabaseTableInfo
+                    {
+                        TableName = tbl,
+                        RowCount = count,
+                        Exists = true
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting database tables list");
+        }
+        return result;
+    }
+
+    public async Task<DatabaseMigrationResult> InitializeOrUpdateSchemaAsync(bool seedDataIfEmpty = true, CancellationToken ct = default)
+    {
+        var result = new DatabaseMigrationResult();
+        try
+        {
+            using var conn = CreateConnection();
+            if (conn is DbConnection dbConn) await dbConn.OpenAsync(ct);
+            else conn.Open();
+
+            if (string.Equals(_providerName, "SqlServer", StringComparison.OrdinalIgnoreCase))
+            {
+                string script = GenerateIdempotentSqlScript("SqlServer");
+                // Execute in batches by splitting GO or executing commands
+                var commands = script.Split(new[] { "\nGO\r\n", "\nGO\n", "\r\nGO\r\n", "\r\nGO\n" }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var cmd in commands)
+                {
+                    if (string.IsNullOrWhiteSpace(cmd)) continue;
+                    try
+                    {
+                        await conn.ExecuteAsync(new CommandDefinition(cmd, cancellationToken: ct));
+                    }
+                    catch (Exception ex)
+                    {
+                        result.Warnings.Add($"Batch warning: {ex.Message}");
+                    }
+                }
+                result.Success = true;
+                result.Message = "Esquema de SQL Server verificado e inicializado en modo idempotente. Ningún dato fue borrado.";
+            }
+            else
+            {
+                InitializeSqliteSchema();
+                result.Success = true;
+                result.Message = "Esquema SQLite verificado e inicializado en modo seguro. Ningún dato fue borrado.";
+            }
+
+            var tables = await GetTablesAsync(ct);
+            result.TablesCreatedOrVerified = tables.Select(t => $"{t.TableName} ({t.RowCount} filas)").ToList();
+        }
+        catch (Exception ex)
+        {
+            result.Success = false;
+            result.Message = $"Error durante la verificación/migración de base de datos: {ex.Message}";
+            _logger.LogError(ex, "Database schema migration failed");
+        }
+        return result;
+    }
+
+    public string GenerateIdempotentSqlScript(string targetProvider = "SqlServer")
+    {
+        string fileName = string.Equals(targetProvider, "Sqlite", StringComparison.OrdinalIgnoreCase)
+            ? "LineVision_Idempotent_Setup_Sqlite.sql"
+            : "LineVision_Idempotent_Setup_SqlServer.sql";
+
+        // Try local sql/ directory first
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "sql", fileName),
+            Path.Combine(Directory.GetCurrentDirectory(), "sql", fileName),
+            Path.Combine(Directory.GetCurrentDirectory(), "..", "sql", fileName),
+            Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "sql", fileName)
+        };
+
+        foreach (var path in candidates)
+        {
+            if (File.Exists(path))
+            {
+                return File.ReadAllText(path);
+            }
+        }
+
+        return $"-- File {fileName} not found on disk. Run generator script.";
     }
 
     public async Task<bool> TestConnectionAsync(CancellationToken ct = default)
     {
-        try
-        {
-            using var conn = CreateConnection();
-            if (conn is DbConnection dbConn)
-            {
-                await dbConn.OpenAsync(ct);
-                return true;
-            }
-            conn.Open();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error testing database connection ({Provider})", _providerName);
-            return false;
-        }
+        var test = await TestConnectionAsync(null, ct);
+        return test.Success;
     }
 
     public async Task<T?> QuerySingleOrDefaultAsync<T>(string sql, object? param = null, CancellationToken ct = default)
