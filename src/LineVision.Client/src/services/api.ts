@@ -453,5 +453,67 @@ export const api = {
   async getDatabaseSqlScript(provider: string = 'SqlServer') {
     const res = await fetch(`${API_BASE}/api/database/script?provider=${encodeURIComponent(provider)}`);
     return await res.json();
+  },
+
+  // TELNET / TCP SOCKET GATEWAY (APP PROVEEDOR 127.0.0.1:12345)
+  async getTelnetConfig() {
+    const res = await fetch(`${API_BASE}/api/plc/gateway/config`);
+    return await res.json();
+  },
+
+  async saveTelnetConfig(config: any) {
+    const res = await fetch(`${API_BASE}/api/plc/gateway/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    return await res.json();
+  },
+
+  async testTelnetConnection(params?: { host?: string; port?: number; timeoutMs?: number }) {
+    const res = await fetch(`${API_BASE}/api/plc/gateway/test-connection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params || {})
+    });
+    return await res.json();
+  },
+
+  async sendTelnetRecipe(recipeA: number, recipeB: number, cradleCode?: string, model?: string) {
+    const res = await fetch(`${API_BASE}/api/plc/gateway/send-recipe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipeA, recipeB, cradleCode, model })
+    });
+    return await res.json();
+  },
+
+  async sendTelnetRawCommand(command: string) {
+    const res = await fetch(`${API_BASE}/api/plc/gateway/send-raw`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command })
+    });
+    return await res.json();
+  },
+
+  async getTelnetLogs(count: number = 50) {
+    const res = await fetch(`${API_BASE}/api/plc/gateway/logs?count=${count}`);
+    return await res.json();
+  },
+
+  async clearTelnetLogs() {
+    const res = await fetch(`${API_BASE}/api/plc/gateway/clear-logs`, { method: 'POST' });
+    return await res.json();
+  },
+
+  async toggleTelnetMock(enable: boolean, port: number = 12345) {
+    const res = await fetch(`${API_BASE}/api/plc/gateway/mock/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enable, port })
+    });
+    return await res.json();
   }
 };
+

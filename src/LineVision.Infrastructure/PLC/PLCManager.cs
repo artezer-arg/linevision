@@ -11,6 +11,7 @@ public class PLCManager : IPLCService
 {
     private readonly IDatabaseService _db;
     private readonly PLCSimulator _simulator;
+    private readonly TelnetGatewayService? _telnetGateway;
     private readonly ILogger<PLCManager> _logger;
     private PLCConfiguration _config;
     private readonly object _lock = new();
@@ -20,13 +21,14 @@ public class PLCManager : IPLCService
     private double _lastPingLatencyMs = 0;
 
     public string PLCId => _config.PLC_ID;
-    public bool IsConnected => _config.Protocol == "SIMULATOR" ? _simulator.IsConnected : _isPhysicalConnected;
+    public bool IsConnected => _config.Protocol == "SIMULATOR" ? _simulator.IsConnected : (_config.Protocol == "TELNET_GATEWAY" ? (_telnetGateway?.IsMockRunning == true || _isPhysicalConnected) : _isPhysicalConnected);
     public PLCConfiguration CurrentConfig => _config;
 
-    public PLCManager(IDatabaseService db, PLCSimulator simulator, ILogger<PLCManager> logger)
+    public PLCManager(IDatabaseService db, PLCSimulator simulator, ILogger<PLCManager> logger, TelnetGatewayService? telnetGateway = null)
     {
         _db = db;
         _simulator = simulator;
+        _telnetGateway = telnetGateway;
         _logger = logger;
 
         // Default initial config while loading from DB
@@ -154,6 +156,21 @@ public class PLCManager : IPLCService
                 LatencyMs = 0.5,
                 Message = "Simulador PLC Activo y Operativo (Memoria Interna)",
                 Protocol = "SIMULATOR"
+            };
+        }
+
+        if (_telnetGateway != null && string.Equals(_config.Protocol, "TELNET_GATEWAY", StringComparison.OrdinalIgnoreCase))
+        {
+            var telnetRes = await _telnetGateway.TestConnectionAsync(targetIp, targetPort, targetTimeout, ct);
+            _isPhysicalConnected = telnetRes.Success;
+            return new TcpPingResult
+            {
+                Success = telnetRes.Success,
+                IPAddress = targetIp,
+                Port = targetPort,
+                LatencyMs = telnetRes.DurationMs,
+                Message = telnetRes.Message,
+                Protocol = "TELNET_GATEWAY"
             };
         }
 
@@ -359,6 +376,18 @@ public class PLCManager : IPLCService
 
     public async Task<bool> WriteRecipeAsync(int recipeA, int recipeB, CancellationToken ct = default)
     {
+        if (_telnetGateway != null && string.Equals(_config.Protocol, "TELNET_GATEWAY", StringComparison.OrdinalIgnoreCase))
+        {
+            var res = await _telnetGateway.SendRecipeAsync(recipeA, recipeB, null, null, ct);
+            if (res.Success)
+            {
+                await _simulator.WriteRecipeAsync(recipeA, recipeB, ct);
+                return true;
+            }
+            _logger.LogError("Telnet Gateway failed to send recipe: {Err}", res.Message);
+            return false;
+        }
+
         return await _simulator.WriteRecipeAsync(recipeA, recipeB, ct);
     }
 

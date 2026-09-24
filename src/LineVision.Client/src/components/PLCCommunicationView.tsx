@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { PLCConfiguration, PLCStatusInfo, TcpPingResult, HandshakeTestResult } from '../types';
 import { api } from '../services/api';
+import { TelnetGatewaySection } from './TelnetGatewaySection';
 import {
   Cpu,
   Activity,
@@ -17,10 +18,12 @@ import {
   Sliders,
   Radio,
   FileCode,
-  HardDrive
+  HardDrive,
+  Terminal
 } from 'lucide-react';
 
 export const PLCCommunicationView: React.FC = () => {
+  const [activeSubTab, setActiveSubTab] = useState<'TELNET' | 'DIRECT'>('TELNET');
   const [config, setConfig] = useState<PLCConfiguration>({
     plC_ID: 'PLC_DL02',
     stationCode: 'DL02',
@@ -53,6 +56,14 @@ export const PLCCommunicationView: React.FC = () => {
 
   // Protocols catalog
   const PROTOCOLS = [
+    {
+      id: 'TELNET_GATEWAY',
+      name: 'Gateway Telnet (App Proveedor)',
+      desc: 'App puente local en 127.0.0.1:12345 (Bridge / Socket TCP)',
+      defaultPort: 12345,
+      badge: 'APP LOCAL',
+      color: 'emerald'
+    },
     {
       id: 'SIMULATOR',
       name: 'Simulador Interno',
@@ -158,6 +169,17 @@ export const PLCCommunicationView: React.FC = () => {
 
   const handleProtocolSelect = (protoId: any) => {
     const protoDef = PROTOCOLS.find(p => p.id === protoId);
+    if (protoId === 'TELNET_GATEWAY') {
+      setConfig(prev => ({
+        ...prev,
+        protocol: 'TELNET_GATEWAY',
+        ipAddress: '127.0.0.1',
+        port: 12345
+      }));
+      setActiveSubTab('TELNET');
+      showToast('info', 'Preset aplicado: Gateway Telnet en 127.0.0.1:12345');
+      return;
+    }
     setConfig(prev => ({
       ...prev,
       protocol: protoId,
@@ -358,7 +380,52 @@ export const PLCCommunicationView: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Sub Navigation Bar */}
+      <div className="flex items-center space-x-3 border-b border-industrial-border pb-2">
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('TELNET')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center space-x-2 transition ${
+            activeSubTab === 'TELNET'
+              ? 'bg-gradient-to-r from-emerald-600 to-cyan-600 text-white shadow-lg shadow-emerald-950/40 ring-2 ring-emerald-400/40'
+              : 'bg-slate-900/60 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          }`}
+        >
+          <Terminal className="w-4 h-4 text-cyan-300" />
+          <span>Gateway Telnet / TCP Socket (127.0.0.1:12345)</span>
+          <span className="px-1.5 py-0.5 bg-black/40 rounded text-[9px] text-emerald-300 border border-emerald-500/40 font-mono">
+            APP PROVEEDOR
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('DIRECT')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-2 transition ${
+            activeSubTab === 'DIRECT'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-950/40 ring-2 ring-indigo-400/40 font-black'
+              : 'bg-slate-900/60 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          }`}
+        >
+          <Cpu className="w-4 h-4 text-indigo-300" />
+          <span>Drivers Directos PLC (Siemens / Rockwell / Modbus / Simulador)</span>
+        </button>
+      </div>
+
+      {activeSubTab === 'TELNET' ? (
+        <TelnetGatewaySection
+          plcConfig={config}
+          onActivateAsMainDriver={async () => {
+            const next: PLCConfiguration = { ...config, protocol: 'TELNET_GATEWAY', ipAddress: '127.0.0.1', port: 12345 };
+            setConfig(next);
+            await api.savePLCConfig(next);
+            showToast('success', 'Gateway Telnet activado como driver principal de la estación DL02');
+            await fetchLiveStatus();
+          }}
+          showToast={showToast}
+        />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 2. Columna Izquierda: Parámetros de Red y Protocolo */}
         <div className="lg:col-span-2 space-y-6">
           {/* Card: Selector de Protocolo */}
@@ -829,6 +896,7 @@ export const PLCCommunicationView: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 };

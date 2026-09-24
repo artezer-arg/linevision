@@ -39,6 +39,7 @@ builder.Services.AddSingleton<PLCConfiguration>(sp =>
     };
 });
 builder.Services.AddSingleton<PLCSimulator>();
+builder.Services.AddSingleton<TelnetGatewayService>();
 builder.Services.AddSingleton<PLCManager>();
 builder.Services.AddSingleton<IPLCService>(sp => sp.GetRequiredService<PLCManager>());
 builder.Services.AddSingleton<PLCHandshakeCoordinator>();

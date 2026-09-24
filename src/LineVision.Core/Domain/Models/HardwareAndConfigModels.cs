@@ -175,3 +175,34 @@ public class Role
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
 }
+
+public class TelnetGatewayConfig
+{
+    public string Host { get; set; } = "127.0.0.1";
+    public int Port { get; set; } = 12345;
+    public int TimeoutMs { get; set; } = 3000;
+    public string CommandTemplate { get; set; } = "RECIPE:{recipeA},{recipeB}";
+    public string LineTerminator { get; set; } = "CRLF"; // "CRLF", "LF", "CR", "NONE"
+    public bool WaitForResponse { get; set; } = true;
+    public string ExpectedResponsePattern { get; set; } = "OK|ACK|RECIPE";
+    public bool MockServerEnabled { get; set; } = false;
+    public bool Active { get; set; } = true;
+}
+
+public class TelnetSendResult
+{
+    public bool Success { get; set; }
+    public string SentPayload { get; set; } = string.Empty;
+    public string? ReceivedResponse { get; set; }
+    public int DurationMs { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+}
+
+public class TelnetLogEntry
+{
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    public string Direction { get; set; } = "SEND"; // "SEND", "RECV", "INFO", "ERROR"
+    public string Content { get; set; } = string.Empty;
+}
+

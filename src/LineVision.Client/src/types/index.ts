@@ -165,7 +165,7 @@ export interface CradleQRMapping {
 export interface PLCConfiguration {
   plC_ID: string;
   stationCode: string;
-  protocol: 'SIMULATOR' | 'SIEMENS_S7' | 'MODBUS_TCP' | 'ETHERNET_IP' | 'OPC_UA';
+  protocol: 'SIMULATOR' | 'SIEMENS_S7' | 'MODBUS_TCP' | 'ETHERNET_IP' | 'OPC_UA' | 'TELNET_GATEWAY';
   ipAddress: string;
   port: number;
   pollingIntervalMs: number;
@@ -276,3 +276,31 @@ export interface SqlScriptInfo {
   filename: string;
   content: string;
 }
+
+export interface TelnetGatewayConfig {
+  host: string;
+  port: number;
+  timeoutMs: number;
+  commandTemplate: string;
+  lineTerminator: 'CRLF' | 'LF' | 'CR' | 'NONE';
+  waitForResponse: boolean;
+  expectedResponsePattern: string;
+  active: boolean;
+  isMockRunning?: boolean;
+}
+
+export interface TelnetSendResult {
+  success: boolean;
+  sentPayload: string;
+  receivedResponse?: string;
+  durationMs: number;
+  message: string;
+  timestamp: string;
+}
+
+export interface TelnetLogEntry {
+  timestamp: string;
+  direction: 'SEND' | 'RECV' | 'INFO' | 'ERROR';
+  content: string;
+}
+
