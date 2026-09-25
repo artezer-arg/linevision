@@ -112,30 +112,43 @@ public class OpenCvCameraProvider : ICameraProvider
 
     private CameraFrame? _lastFrame;
 
+    private DateTime _lastReconnectAttempt = DateTime.MinValue;
+
     public Task<CameraFrame> CaptureFrameAsync(CancellationToken ct = default)
     {
         lock (_lock)
         {
             if (!_isConnected || _capture == null || !_capture.IsOpened())
             {
-                ConnectInternal();
+                if ((DateTime.UtcNow - _lastReconnectAttempt).TotalSeconds >= 5)
+                {
+                    _lastReconnectAttempt = DateTime.UtcNow;
+                    ConnectInternal();
+                }
             }
 
             using var mat = new Mat();
             bool grabbed = false;
 
-            if (_capture != null && _capture.IsOpened())
+            if (_isConnected && _capture != null && _capture.IsOpened())
             {
-                grabbed = _capture.Read(mat);
+                try
+                {
+                    grabbed = _capture.Read(mat);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("Exception reading from camera {CameraId}: {Err}", CameraId, ex.Message);
+                    grabbed = false;
+                }
             }
 
             if (!grabbed || mat.Empty())
             {
-                _logger.LogWarning("Camera frame read failed for {CameraId}, attempting reconnect...", CameraId);
-                DisconnectInternal();
-                if (ConnectInternal() && _capture != null)
+                if (_isConnected)
                 {
-                    grabbed = _capture.Read(mat);
+                    _logger.LogWarning("Camera frame read failed for {CameraId}, marking disconnected", CameraId);
+                    DisconnectInternal();
                 }
             }
 
