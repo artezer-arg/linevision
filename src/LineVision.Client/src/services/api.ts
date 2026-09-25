@@ -423,6 +423,24 @@ export const api = {
     return await res.json();
   },
 
+  async sendS7Recipe(params: {
+    ipAddress?: string;
+    recipe: number;
+    sendConfirmation: boolean;
+    confirmationValue?: boolean;
+    recipeAddress?: string;
+    confirmAddress?: string;
+    rack?: number;
+    slot?: number;
+  }) {
+    const res = await fetch(`${API_BASE}/api/plc/send-s7-recipe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+    return await res.json();
+  },
+
   // DATABASE CONFIGURATION & SAFE IDEMPOTENT MIGRATIONS
   async getDatabaseConfig() {
     const res = await fetch(`${API_BASE}/api/database/config`);

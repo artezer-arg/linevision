@@ -466,6 +466,85 @@ public class PLCManager : IPLCService
         }
     }
 
+    public async Task<S7RecipeAndConfirmationResult> WriteS7RecipeAndConfirmationAsync(
+        string ip,
+        short recipe,
+        bool sendConfirmation = false,
+        bool confirmationValue = true,
+        string recipeAddress = "DB48.DBW2",
+        string confirmAddress = "DB48.DBX4.0",
+        short rack = 0,
+        short slot = 1,
+        CancellationToken ct = default)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var plc = new S7.Net.Plc(S7.Net.CpuType.S71500, ip, rack, slot);
+            await plc.OpenAsync(ct);
+            if (!plc.IsConnected)
+            {
+                return new S7RecipeAndConfirmationResult
+                {
+                    Success = false,
+                    Message = $"No se pudo conectar al PLC Siemens S7-1500 en {ip}:102 (Rack={rack}, Slot={slot})",
+                    DurationMs = (int)sw.ElapsedMilliseconds
+                };
+            }
+
+            string cleanRecipeAddr = recipeAddress.Split(' ')[0].Trim();
+            string cleanConfirmAddr = confirmAddress.Split(' ')[0].Trim();
+
+            // 1. Escribir Receta (entero en DB48.DBW2)
+            await plc.WriteAsync(cleanRecipeAddr, recipe);
+            var readRecipe = await plc.ReadAsync(cleanRecipeAddr);
+            short verifiedRecipe = Convert.ToInt16(readRecipe);
+
+            // 2. Si sendConfirmation está activado, escribir booleano en DB48.DBX4.0
+            bool? verifiedConfirm = null;
+            if (sendConfirmation)
+            {
+                await plc.WriteAsync(cleanConfirmAddr, confirmationValue);
+                var readConfirm = await plc.ReadAsync(cleanConfirmAddr);
+                verifiedConfirm = Convert.ToBoolean(readConfirm);
+            }
+
+            sw.Stop();
+            string msg = sendConfirmation
+                ? $"Receta {recipe} escrita en {cleanRecipeAddr} y Confirmación {confirmationValue} escrita en {cleanConfirmAddr} (Verificado: Receta={verifiedRecipe}, Confirm={verifiedConfirm})"
+                : $"Receta {recipe} escrita exitosamente en {cleanRecipeAddr} (Confirmación desactivada, verificado: {verifiedRecipe})";
+
+            return new S7RecipeAndConfirmationResult
+            {
+                Success = true,
+                IPAddress = ip,
+                RecipeAddress = cleanRecipeAddr,
+                RecipeSent = recipe,
+                RecipeVerified = verifiedRecipe,
+                SendConfirmation = sendConfirmation,
+                ConfirmAddress = cleanConfirmAddr,
+                ConfirmationSent = sendConfirmation ? confirmationValue : null,
+                ConfirmationVerified = verifiedConfirm,
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                Message = msg
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogError(ex, "Error escribiendo receta/confirmación en Siemens S7 {IP}", ip);
+            return new S7RecipeAndConfirmationResult
+            {
+                Success = false,
+                IPAddress = ip,
+                RecipeSent = recipe,
+                SendConfirmation = sendConfirmation,
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                Message = $"Error comunicando con Siemens S7: {ex.Message}"
+            };
+        }
+    }
+
     public void SetSimulationState(PLCLogicalState state, int? echoA = null, int? echoB = null)
     {
         _simulator.SetSimulationState(state, echoA, echoB);
@@ -480,6 +559,21 @@ public class PLCManager : IPLCService
     {
         return _simulator.DisposeAsync();
     }
+}
+
+public class S7RecipeAndConfirmationResult
+{
+    public bool Success { get; set; }
+    public string IPAddress { get; set; } = string.Empty;
+    public string RecipeAddress { get; set; } = "DB48.DBW2";
+    public short RecipeSent { get; set; }
+    public short? RecipeVerified { get; set; }
+    public bool SendConfirmation { get; set; }
+    public string ConfirmAddress { get; set; } = "DB48.DBX4.0";
+    public bool? ConfirmationSent { get; set; }
+    public bool? ConfirmationVerified { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public int DurationMs { get; set; }
 }
 
 public class S7WriteResult

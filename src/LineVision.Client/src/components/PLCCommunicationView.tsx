@@ -54,6 +54,8 @@ export const PLCCommunicationView: React.FC = () => {
   const [testA, setTestA] = useState<number>(99);
   const [testB, setTestB] = useState<number>(88);
   const [s7Value, setS7Value] = useState<number>(24);
+  const [s7SendConfirm, setS7SendConfirm] = useState<boolean>(false);
+  const [s7ConfirmVal, setS7ConfirmVal] = useState<boolean>(true);
   const [s7Loading, setS7Loading] = useState(false);
   const [s7Result, setS7Result] = useState<any>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -299,18 +301,21 @@ export const PLCCommunicationView: React.FC = () => {
     setS7Loading(true);
     setS7Result(null);
     try {
-      const res = await api.writeS7Int({
+      const res = await api.sendS7Recipe({
         ipAddress: config.ipAddress,
-        address: 'DB48.DBW2',
-        value: s7Value,
+        recipe: s7Value,
+        sendConfirmation: s7SendConfirm,
+        confirmationValue: s7ConfirmVal,
+        recipeAddress: 'DB48.DBW2',
+        confirmAddress: 'DB48.DBX4.0',
         rack: 0,
         slot: 1
       });
       setS7Result(res);
       if (res && res.success) {
-        showToast('success', res.message || `Escrito ${s7Value} en DB48.DBW2 exitosamente`);
+        showToast('success', res.message || 'Transmisión Siemens S7-1500 completada');
       } else {
-        showToast('error', res?.message || 'Error al escribir en Siemens S7');
+        showToast('error', res?.message || 'Error al comunicarse con Siemens S7');
       }
     } catch (err: any) {
       showToast('error', err.message || 'Error de red comunicando con PLC');
@@ -923,26 +928,30 @@ export const PLCCommunicationView: React.FC = () => {
             )}
           </div>
 
-          {/* Card: Envío Directo Siemens DB48.DBW2 */}
+          {/* Card: Envío Directo Siemens DB48 (Receta + Confirmación Opcional) */}
           <div className="bg-industrial-card border border-industrial-border rounded-2xl p-5 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-industrial-border/60 pb-3">
               <h3 className="text-sm font-extrabold text-white flex items-center space-x-2">
                 <Cpu className="w-4 h-4 text-cyan-400" />
-                <span>ESCRITURA DIRECTA SIEMENS (DB48.DBW2)</span>
+                <span>COMUNICACIÓN DIRECTA SIEMENS (DB48)</span>
               </h3>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold">
-                nModeloCamara
+                DB48.DBW2 + DB48.DBX4.0
               </span>
             </div>
 
             <p className="text-[11px] text-slate-400">
-              Envía un entero (16-bit Int) directamente a <strong className="text-white">DB48.DBW2</strong> en el PLC Siemens S7-1500 ({config.ipAddress}:102).
+              Envía la receta (<strong className="text-white">DB48.DBW2</strong>) y opcionalmente el bit de confirmación (<strong className="text-white">DB48.DBX4.0</strong>) a Siemens S7-1500 ({config.ipAddress}:102).
             </p>
 
+            {/* 1. Entero de Receta */}
             <div>
-              <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
-                Entero a Escribir en DB48.DBW2 (Int)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] uppercase font-bold text-slate-400">
+                  1. Receta (Entero 16-bit Int)
+                </label>
+                <span className="text-[9px] font-mono text-cyan-400 font-bold">DB48.DBW2 (nModeloCamara)</span>
+              </div>
               <input
                 type="number"
                 value={s7Value}
@@ -952,6 +961,65 @@ export const PLCCommunicationView: React.FC = () => {
               />
             </div>
 
+            {/* 2. Switch Toggle para Confirmación Booleana */}
+            <div className="bg-industrial-dark/70 border border-industrial-border rounded-xl p-3.5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-black text-white block">2. Señal de Confirmación</span>
+                  <span className="text-[10px] font-mono text-slate-400">DB48.DBX4.0 (bResultadoOK)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setS7SendConfirm(!s7SendConfirm)}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition flex items-center space-x-1.5 border ${
+                    s7SendConfirm
+                      ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-950/50'
+                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'
+                  }`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${s7SendConfirm ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                  <span>{s7SendConfirm ? 'ACTIVADA (Se enviará)' : 'DESACTIVADA (No enviar)'}</span>
+                </button>
+              </div>
+
+              {s7SendConfirm ? (
+                <div className="pt-2 border-t border-industrial-border/60">
+                  <span className="text-[10px] font-bold text-slate-400 block mb-1.5">Valor del Booleano a enviar:</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setS7ConfirmVal(true)}
+                      className={`py-1.5 rounded-lg text-xs font-black transition flex items-center justify-center space-x-1.5 border ${
+                        s7ConfirmVal
+                          ? 'bg-emerald-600 text-white border-emerald-400 shadow-md shadow-emerald-900/40'
+                          : 'bg-slate-900/80 text-slate-400 border-industrial-border hover:bg-slate-800'
+                      }`}
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>TRUE (1 - OK)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setS7ConfirmVal(false)}
+                      className={`py-1.5 rounded-lg text-xs font-black transition flex items-center justify-center space-x-1.5 border ${
+                        !s7ConfirmVal
+                          ? 'bg-rose-600 text-white border-rose-400 shadow-md shadow-rose-900/40'
+                          : 'bg-slate-900/80 text-slate-400 border-industrial-border hover:bg-slate-800'
+                      }`}
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>FALSE (0 - NOK)</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[10px] text-slate-500 italic">
+                  Solo se enviará el entero a DB48.DBW2. El bit bResultadoOK (DB48.DBX4.0) permanecerá intacto en el PLC.
+                </p>
+              )}
+            </div>
+
+            {/* Botón de Envío */}
             <button
               type="button"
               onClick={handleWriteS7Value}
@@ -959,23 +1027,25 @@ export const PLCCommunicationView: React.FC = () => {
               className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-extrabold text-xs shadow-lg shadow-cyan-950/50 flex items-center justify-center space-x-2 transition disabled:opacity-50"
             >
               <Send className="w-4 h-4" />
-              <span>{s7Loading ? 'Escribiendo en Siemens S7-1500...' : 'Enviar Entero a DB48.DBW2'}</span>
+              <span>{s7Loading ? 'Transmitiendo a Siemens S7-1500...' : (s7SendConfirm ? 'Enviar Receta + Confirmación a PLC' : 'Enviar Receta a DB48.DBW2')}</span>
             </button>
 
+            {/* Resultado */}
             {s7Result && (
-              <div className={`p-3 rounded-xl border text-xs space-y-1 font-mono ${
+              <div className={`p-3 rounded-xl border text-xs space-y-1.5 font-mono ${
                 s7Result.success ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
               }`}>
                 <div className="flex items-center justify-between">
-                  <strong className="font-sans font-bold">{s7Result.success ? 'ESCRITURA CONFIRMADA' : 'ERROR AL ESCRIBIR'}</strong>
+                  <strong className="font-sans font-bold">{s7Result.success ? 'TRANSMISIÓN CONFIRMADA' : 'ERROR DE TRANSMISIÓN'}</strong>
                   {s7Result.durationMs !== undefined && <span className="text-[11px] font-black">{s7Result.durationMs} ms</span>}
                 </div>
                 <p className="text-[10px] text-slate-300">{s7Result.message}</p>
-                {s7Result.verifiedValue !== undefined && s7Result.verifiedValue !== null && (
-                  <p className="text-[10px] text-cyan-300 font-bold">
-                    Valor verificado en PLC: {s7Result.verifiedValue}
-                  </p>
-                )}
+                <div className="pt-1 border-t border-slate-700/50 text-[10px] space-y-0.5">
+                  <div>Receta en DB48.DBW2: <strong className="text-white">{s7Result.recipeVerified ?? s7Result.recipeSent ?? '--'}</strong></div>
+                  <div>Confirmación en DB48.DBX4.0: <strong className={s7Result.sendConfirmation ? (s7Result.confirmationVerified ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-400'}>
+                    {s7Result.sendConfirmation ? (s7Result.confirmationVerified ? 'TRUE (OK)' : 'FALSE (NOK)') : 'DESACTIVADA (No enviada)'}
+                  </strong></div>
+                </div>
               </div>
             )}
           </div>

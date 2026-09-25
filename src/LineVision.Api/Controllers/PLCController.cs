@@ -138,6 +138,50 @@ public class PLCController : ControllerBase
         }
         return StatusCode(500, result);
     }
+
+    [HttpPost("send-s7-recipe")]
+    public async Task<IActionResult> SendS7Recipe([FromBody] SendS7RecipeRequest request)
+    {
+        if (request == null)
+        {
+            return BadRequest(new { Message = "Payload es requerido" });
+        }
+
+        string ip = string.IsNullOrWhiteSpace(request.IPAddress) ? _plcManager.CurrentConfig.IPAddress : request.IPAddress.Trim();
+        string recipeAddr = string.IsNullOrWhiteSpace(request.RecipeAddress) ? "DB48.DBW2" : request.RecipeAddress.Trim();
+        string confirmAddr = string.IsNullOrWhiteSpace(request.ConfirmAddress) ? "DB48.DBX4.0" : request.ConfirmAddress.Trim();
+        short recipeVal = (short)request.Recipe;
+        short rack = (short)(request.Rack ?? 0);
+        short slot = (short)(request.Slot ?? 1);
+
+        var result = await _plcManager.WriteS7RecipeAndConfirmationAsync(
+            ip,
+            recipeVal,
+            request.SendConfirmation,
+            request.ConfirmationValue,
+            recipeAddr,
+            confirmAddr,
+            rack,
+            slot);
+
+        if (result.Success)
+        {
+            return Ok(result);
+        }
+        return StatusCode(500, result);
+    }
+}
+
+public class SendS7RecipeRequest
+{
+    public string? IPAddress { get; set; }
+    public int Recipe { get; set; }
+    public bool SendConfirmation { get; set; } = false;
+    public bool ConfirmationValue { get; set; } = true;
+    public string? RecipeAddress { get; set; } = "DB48.DBW2";
+    public string? ConfirmAddress { get; set; } = "DB48.DBX4.0";
+    public int? Rack { get; set; } = 0;
+    public int? Slot { get; set; } = 1;
 }
 
 public class WriteS7IntRequest
