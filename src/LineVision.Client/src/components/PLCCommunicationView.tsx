@@ -19,7 +19,8 @@ import {
   Radio,
   FileCode,
   HardDrive,
-  Terminal
+  Terminal,
+  Send
 } from 'lucide-react';
 
 export const PLCCommunicationView: React.FC = () => {
@@ -52,6 +53,9 @@ export const PLCCommunicationView: React.FC = () => {
   const [handshakeResult, setHandshakeResult] = useState<HandshakeTestResult | null>(null);
   const [testA, setTestA] = useState<number>(99);
   const [testB, setTestB] = useState<number>(88);
+  const [s7Value, setS7Value] = useState<number>(24);
+  const [s7Loading, setS7Loading] = useState(false);
+  const [s7Result, setS7Result] = useState<any>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   // Protocols catalog
@@ -288,6 +292,30 @@ export const PLCCommunicationView: React.FC = () => {
       showToast('error', 'Error ejecutando handshake de prueba');
     } finally {
       setHandshakeLoading(false);
+    }
+  };
+
+  const handleWriteS7Value = async () => {
+    setS7Loading(true);
+    setS7Result(null);
+    try {
+      const res = await api.writeS7Int({
+        ipAddress: config.ipAddress,
+        address: 'DB48.DBW2',
+        value: s7Value,
+        rack: 0,
+        slot: 1
+      });
+      setS7Result(res);
+      if (res && res.success) {
+        showToast('success', res.message || `Escrito ${s7Value} en DB48.DBW2 exitosamente`);
+      } else {
+        showToast('error', res?.message || 'Error al escribir en Siemens S7');
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'Error de red comunicando con PLC');
+    } finally {
+      setS7Loading(false);
     }
   };
 
@@ -891,6 +919,63 @@ export const PLCCommunicationView: React.FC = () => {
                   <span className="text-[11px] font-black">{handshakeResult.durationMs} ms</span>
                 </div>
                 <p className="text-[10px] text-slate-300">{handshakeResult.message}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Card: Envío Directo Siemens DB48.DBW2 */}
+          <div className="bg-industrial-card border border-industrial-border rounded-2xl p-5 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-industrial-border/60 pb-3">
+              <h3 className="text-sm font-extrabold text-white flex items-center space-x-2">
+                <Cpu className="w-4 h-4 text-cyan-400" />
+                <span>ESCRITURA DIRECTA SIEMENS (DB48.DBW2)</span>
+              </h3>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold">
+                nModeloCamara
+              </span>
+            </div>
+
+            <p className="text-[11px] text-slate-400">
+              Envía un entero (16-bit Int) directamente a <strong className="text-white">DB48.DBW2</strong> en el PLC Siemens S7-1500 ({config.ipAddress}:102).
+            </p>
+
+            <div>
+              <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
+                Entero a Escribir en DB48.DBW2 (Int)
+              </label>
+              <input
+                type="number"
+                value={s7Value}
+                onChange={e => setS7Value(parseInt(e.target.value) || 0)}
+                placeholder="24"
+                className="w-full bg-industrial-dark border border-industrial-border rounded-lg px-2.5 py-2 text-sm font-mono text-cyan-400 font-black text-center"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleWriteS7Value}
+              disabled={s7Loading}
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-extrabold text-xs shadow-lg shadow-cyan-950/50 flex items-center justify-center space-x-2 transition disabled:opacity-50"
+            >
+              <Send className="w-4 h-4" />
+              <span>{s7Loading ? 'Escribiendo en Siemens S7-1500...' : 'Enviar Entero a DB48.DBW2'}</span>
+            </button>
+
+            {s7Result && (
+              <div className={`p-3 rounded-xl border text-xs space-y-1 font-mono ${
+                s7Result.success ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <strong className="font-sans font-bold">{s7Result.success ? 'ESCRITURA CONFIRMADA' : 'ERROR AL ESCRIBIR'}</strong>
+                  {s7Result.durationMs !== undefined && <span className="text-[11px] font-black">{s7Result.durationMs} ms</span>}
+                </div>
+                <p className="text-[10px] text-slate-300">{s7Result.message}</p>
+                {s7Result.verifiedValue !== undefined && s7Result.verifiedValue !== null && (
+                  <p className="text-[10px] text-cyan-300 font-bold">
+                    Valor verificado en PLC: {s7Result.verifiedValue}
+                  </p>
+                )}
               </div>
             )}
           </div>

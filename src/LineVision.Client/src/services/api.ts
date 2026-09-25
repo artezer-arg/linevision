@@ -414,6 +414,15 @@ export const api = {
     return await res.json();
   },
 
+  async writeS7Int(params: { ipAddress?: string; address?: string; value: number; rack?: number; slot?: number }) {
+    const res = await fetch(`${API_BASE}/api/plc/write-s7-int`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+    return await res.json();
+  },
+
   // DATABASE CONFIGURATION & SAFE IDEMPOTENT MIGRATIONS
   async getDatabaseConfig() {
     const res = await fetch(`${API_BASE}/api/database/config`);

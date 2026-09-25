@@ -411,6 +411,61 @@ public class PLCManager : IPLCService
         return await _simulator.WaitForStateAsync(targetState, timeout, ct);
     }
 
+    public async Task<S7WriteResult> WriteS7DirectAsync(string ip, string address, short value, short rack = 0, short slot = 1, CancellationToken ct = default)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var plc = new S7.Net.Plc(S7.Net.CpuType.S71500, ip, rack, slot);
+            await plc.OpenAsync(ct);
+            if (!plc.IsConnected)
+            {
+                return new S7WriteResult
+                {
+                    Success = false,
+                    Message = $"No se pudo conectar al PLC Siemens S7-1500 en {ip}:102 (Rack={rack}, Slot={slot})",
+                    DurationMs = (int)sw.ElapsedMilliseconds
+                };
+            }
+
+            // Normalizar dirección (por ej. si viene con comentarios como "DB48.DBW2 (nModeloCamara)")
+            string cleanAddr = address.Split(' ')[0].Trim();
+
+            // Escribir entero de 16 bits
+            await plc.WriteAsync(cleanAddr, value);
+
+            // Leer de vuelta para verificación
+            var readBack = await plc.ReadAsync(cleanAddr);
+            short verified = Convert.ToInt16(readBack);
+
+            sw.Stop();
+            return new S7WriteResult
+            {
+                Success = true,
+                IPAddress = ip,
+                Address = cleanAddr,
+                WrittenValue = value,
+                VerifiedValue = verified,
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                Message = $"Valor {value} escrito y verificado exitosamente en {cleanAddr} del PLC ({ip}:102)"
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogError(ex, "Error escribiendo en Siemens S7 {IP}:{Addr}", ip, address);
+            return new S7WriteResult
+            {
+                Success = false,
+                IPAddress = ip,
+                Address = address,
+                WrittenValue = value,
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                Message = $"Error comunicando con Siemens S7: {ex.Message}"
+            };
+        }
+    }
+
     public void SetSimulationState(PLCLogicalState state, int? echoA = null, int? echoB = null)
     {
         _simulator.SetSimulationState(state, echoA, echoB);
@@ -425,6 +480,17 @@ public class PLCManager : IPLCService
     {
         return _simulator.DisposeAsync();
     }
+}
+
+public class S7WriteResult
+{
+    public bool Success { get; set; }
+    public string IPAddress { get; set; } = string.Empty;
+    public string Address { get; set; } = string.Empty;
+    public short WrittenValue { get; set; }
+    public short? VerifiedValue { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public int DurationMs { get; set; }
 }
 
 public class TcpPingResult

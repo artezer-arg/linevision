@@ -116,6 +116,37 @@ public class PLCController : ControllerBase
         }
         return BadRequest(new { Message = $"Estado inválido: {request.State}" });
     }
+
+    [HttpPost("write-s7-int")]
+    public async Task<IActionResult> WriteS7Int([FromBody] WriteS7IntRequest request)
+    {
+        if (request == null)
+        {
+            return BadRequest(new { Message = "Payload es requerido" });
+        }
+
+        string ip = string.IsNullOrWhiteSpace(request.IPAddress) ? _plcManager.CurrentConfig.IPAddress : request.IPAddress.Trim();
+        string addr = string.IsNullOrWhiteSpace(request.Address) ? "DB48.DBW2" : request.Address.Trim();
+        short val = (short)request.Value;
+        short rack = (short)(request.Rack ?? 0);
+        short slot = (short)(request.Slot ?? 1);
+
+        var result = await _plcManager.WriteS7DirectAsync(ip, addr, val, rack, slot);
+        if (result.Success)
+        {
+            return Ok(result);
+        }
+        return StatusCode(500, result);
+    }
+}
+
+public class WriteS7IntRequest
+{
+    public string? IPAddress { get; set; }
+    public string? Address { get; set; } = "DB48.DBW2";
+    public int Value { get; set; }
+    public int? Rack { get; set; } = 0;
+    public int? Slot { get; set; } = 1;
 }
 
 public class TestConnectionRequest
