@@ -221,15 +221,15 @@ export const PLCCommunicationView: React.FC = () => {
         ...prev,
         protocol: 'SIEMENS_S7',
         port: 102,
-        tagRecipeA: 'DB100.DBW0 (Recipe_A)',
-        tagRecipeB: 'DB100.DBW2 (Recipe_B)',
-        tagRecipeReady: 'DB100.DBX4.0 (RecipeReady)',
-        tagStationState: 'DB101.DBW0 (State)',
-        tagRecipeReceived: 'DB101.DBX4.0 (RecipeReceived)',
-        tagEchoRecipeA: 'DB101.DBW6 (Echo_A)',
-        tagEchoRecipeB: 'DB101.DBW8 (Echo_B)'
+        tagRecipeA: 'DB48.DBW0 (nModeloPLC)',
+        tagRecipeB: 'DB48.DBW2 (nModeloCamara)',
+        tagRecipeReady: 'DB48.DBX4.0 (bResultadoOK)',
+        tagStationState: 'DB48.DBW0',
+        tagRecipeReceived: 'DB48.DBX4.0',
+        tagEchoRecipeA: 'DB48.DBW2',
+        tagEchoRecipeB: 'DB48.DBW2'
       }));
-      showToast('info', 'Preset aplicado: Direcciones Siemens S7 DB100/DB101');
+      showToast('info', 'Preset aplicado: Siemens S7-1500 DB48 (nModeloPLC, nModeloCamara, bResultadoOK)');
     }
   };
 
@@ -602,9 +602,9 @@ export const PLCCommunicationView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleApplyPreset('SIEMENS')}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] font-bold text-cyan-300"
+                  className="px-2.5 py-1 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 text-[10px] font-bold text-cyan-300 flex items-center space-x-1"
                 >
-                  Siemens DB
+                  <span>Siemens S7 (DB48)</span>
                 </button>
               </div>
             </div>
