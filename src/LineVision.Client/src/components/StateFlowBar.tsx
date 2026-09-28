@@ -1,10 +1,11 @@
 import React from 'react';
-import { StationState, ProductionCycle } from '../types';
-import { CheckCircle2, AlertCircle, Clock, ArrowRight } from 'lucide-react';
+import { StationState, ProductionCycle, StationWorkflowConfig } from '../types';
+import { ArrowRight, AlertTriangle } from 'lucide-react';
 
 interface Props {
   state: StationState;
   cycle?: ProductionCycle | null;
+  workflowConfig?: StationWorkflowConfig | null;
 }
 
 type StepStatus = 'GRAY' | 'YELLOW' | 'GREEN' | 'RED' | 'BLUE';
@@ -15,7 +16,15 @@ interface FlowStep {
   sub: string;
 }
 
-const FLOW_STEPS: FlowStep[] = [
+const FLOW_5_STEPS: FlowStep[] = [
+  { id: 'ORDER', label: '1. CONSULTA DB', sub: 'Secuencia, Mano y Posición' },
+  { id: 'CRADLE', label: '2. CONTROL CUNA', sub: 'Mano, Posición e Insertos (NG: Reintento)' },
+  { id: 'RECIPE', label: '3. RECETA PLC', sub: 'Envío Entero a DB48.DBW2' },
+  { id: 'PANEL', label: '4. CONTROL PANEL', sub: 'Inspección & Confirmación DB48.DBX4.0' },
+  { id: 'NEXT', label: '5. SIGUIENTE', sub: 'Registro Trazabilidad & Avance Puntero' }
+];
+
+const FLOW_6_STEPS_LEGACY: FlowStep[] = [
   { id: 'CRADLE', label: '1. CUNA', sub: 'Mano, Posición e Insertos' },
   { id: 'QR', label: '2. QR CUNA', sub: 'Validación de Código' },
   { id: 'PANEL', label: '3. PANEL', sub: 'Control de Clips e Insertos' },
@@ -24,11 +33,60 @@ const FLOW_STEPS: FlowStep[] = [
   { id: 'ROBOT', label: '6. ROBOT', sub: 'Soldadura y Fin de Ciclo' }
 ];
 
-export const StateFlowBar: React.FC<Props> = ({ state, cycle }) => {
+export const StateFlowBar: React.FC<Props> = ({ state, cycle, workflowConfig }) => {
+  const isDirect5Step = !workflowConfig || workflowConfig.workflowMode !== 'LEGACY_ROBOT_HANDSHAKE';
+  const steps = isDirect5Step ? FLOW_5_STEPS : FLOW_6_STEPS_LEGACY;
+
   const getStepStatus = (stepId: string): StepStatus => {
     const errCode = cycle?.errorCode || '';
     const isError = state === 'ERROR';
 
+    if (isDirect5Step) {
+      switch (stepId) {
+        case 'ORDER':
+          if (state === 'ORDER_LOADED' || cycle != null) return 'GREEN';
+          if (state === 'WAITING_ORDER') return 'YELLOW';
+          return 'GRAY';
+
+        case 'CRADLE':
+          if (cycle?.cradleResult === 'OK') return 'GREEN';
+          if (cycle?.cradleResult === 'NOK' || errCode.includes('CRADLE')) return 'RED';
+          if (state === 'CHECKING_CRADLE') return 'YELLOW';
+          if (['CRADLE_OK', 'LOADING_RECIPE', 'SENDING_RECIPE', 'WAITING_RECIPE_CONFIRMATION', 'RECIPE_CONFIRMED', 'LOADING_PANEL_INSPECTION_PLAN', 'CHECKING_PANEL', 'PANEL_OK', 'SAVING_STATION_RESULT', 'CYCLE_COMPLETE'].includes(state))
+            return 'GREEN';
+          if (state === 'ORDER_LOADED') return 'BLUE';
+          return 'GRAY';
+
+        case 'RECIPE':
+          if (['RECIPE_CONFIRMED', 'LOADING_PANEL_INSPECTION_PLAN', 'CHECKING_PANEL', 'PANEL_OK', 'SAVING_STATION_RESULT', 'CYCLE_COMPLETE'].includes(state) || cycle?.recipe_A != null)
+            return 'GREEN';
+          if (state === 'LOADING_RECIPE' || state === 'SENDING_RECIPE') return 'YELLOW';
+          if (state === 'WAITING_RECIPE_CONFIRMATION') return 'BLUE';
+          if (isError && errCode.includes('RECIPE')) return 'RED';
+          if (state === 'CRADLE_OK') return 'BLUE';
+          return 'GRAY';
+
+        case 'PANEL':
+          if (cycle?.panelResult === 'OK') return 'GREEN';
+          if (cycle?.panelResult === 'NOK' || errCode.includes('PANEL')) return 'RED';
+          if (state === 'CHECKING_PANEL' || state === 'LOADING_PANEL_INSPECTION_PLAN') return 'YELLOW';
+          if (['PANEL_OK', 'SAVING_STATION_RESULT', 'CYCLE_COMPLETE'].includes(state))
+            return 'GREEN';
+          if (state === 'RECIPE_CONFIRMED') return 'BLUE';
+          return 'GRAY';
+
+        case 'NEXT':
+          if (state === 'CYCLE_COMPLETE') return 'GREEN';
+          if (state === 'SAVING_STATION_RESULT') return 'YELLOW';
+          if (state === 'PANEL_OK') return 'BLUE';
+          return 'GRAY';
+
+        default:
+          return 'GRAY';
+      }
+    }
+
+    // Flujo tradicional de 6 pasos
     switch (stepId) {
       case 'CRADLE':
         if (state === 'CHECKING_CRADLE') return 'YELLOW';
@@ -109,7 +167,7 @@ export const StateFlowBar: React.FC<Props> = ({ state, cycle }) => {
         return {
           container: 'bg-red-950/90 border-red-500 text-red-200 ring-2 ring-red-500',
           badge: 'bg-red-600 text-white',
-          text: 'FALLA NOK'
+          text: 'NO CONFORME'
         };
       default:
         return {
@@ -120,10 +178,25 @@ export const StateFlowBar: React.FC<Props> = ({ state, cycle }) => {
     }
   };
 
+  const isNgRetry = cycle?.errorCode?.includes('NG_RETRY');
+
   return (
-    <div className="bg-industrial-dark p-4 border-b border-industrial-border">
-      <div className="grid grid-cols-6 gap-3">
-        {FLOW_STEPS.map((step, idx) => {
+    <div className="bg-industrial-dark p-4 border-b border-industrial-border space-y-2">
+      {/* Indicador de modo activo */}
+      <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 px-1">
+        <span className="flex items-center space-x-2">
+          <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-ping mr-1"></span>
+          <span>FLUJO ACTIVO: <strong className="text-white">{isDirect5Step ? '5 PASOS DIRECTO SIEMENS S7' : '6 PASOS TRADICIONAL ROBOT'}</strong></span>
+        </span>
+        {isDirect5Step && (
+          <span className="text-xs text-sky-400">
+            Receta: <span className="font-bold text-white">{workflowConfig?.recipeAddress || 'DB48.DBW2'}</span> | Confirmación: <span className="font-bold text-white">{workflowConfig?.confirmationAddress || 'DB48.DBX4.0'}</span> {workflowConfig?.sendConfirmation ? '(Habilitada)' : '(Desactivada)'}
+          </span>
+        )}
+      </div>
+
+      <div className={`grid ${isDirect5Step ? 'grid-cols-5' : 'grid-cols-6'} gap-3`}>
+        {steps.map((step, idx) => {
           const status = getStepStatus(step.id);
           const styles = getStatusStyles(status);
 
@@ -143,7 +216,7 @@ export const StateFlowBar: React.FC<Props> = ({ state, cycle }) => {
               </div>
 
               {/* Step indicator arrow */}
-              {idx < FLOW_STEPS.length - 1 && (
+              {idx < steps.length - 1 && (
                 <div className="hidden lg:block absolute -right-3 top-1/2 -translate-y-1/2 z-10 text-slate-600">
                   <ArrowRight className="w-5 h-5" />
                 </div>
@@ -152,6 +225,22 @@ export const StateFlowBar: React.FC<Props> = ({ state, cycle }) => {
           );
         })}
       </div>
+
+      {/* Cartel de Alerta / Reintento en NG para el operador */}
+      {isNgRetry && cycle?.errorDescription && (
+        <div className="mt-2 p-3 rounded-lg bg-red-950/90 border border-red-500 text-red-200 flex items-center space-x-3 animate-pulse shadow-lg">
+          <AlertTriangle className="w-6 h-6 text-red-400 shrink-0" />
+          <div className="flex-1">
+            <span className="font-extrabold text-sm uppercase block tracking-wide text-red-300">
+              ⚠️ ATENCIÓN OPERADOR (REINTENTO ACTIVO)
+            </span>
+            <span className="text-xs text-slate-200">{cycle.errorDescription}</span>
+          </div>
+          <span className="px-3 py-1 bg-red-600 text-white rounded text-xs font-black shrink-0">
+            ESPERANDO CORRECCIÓN
+          </span>
+        </div>
+      )}
     </div>
   );
 };

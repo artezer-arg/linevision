@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { PLCConfiguration, PLCStatusInfo, TcpPingResult, HandshakeTestResult } from '../types';
+import { PLCConfiguration, PLCStatusInfo, TcpPingResult, HandshakeTestResult, StationWorkflowConfig } from '../types';
 import { api } from '../services/api';
 import { TelnetGatewaySection } from './TelnetGatewaySection';
 import {
@@ -20,11 +20,32 @@ import {
   FileCode,
   HardDrive,
   Terminal,
-  Send
+  Send,
+  ListOrdered
 } from 'lucide-react';
 
-export const PLCCommunicationView: React.FC = () => {
-  const [activeSubTab, setActiveSubTab] = useState<'TELNET' | 'DIRECT'>('TELNET');
+interface Props {
+  workflowConfig?: StationWorkflowConfig | null;
+  onWorkflowConfigUpdated?: (cfg: StationWorkflowConfig) => void;
+}
+
+export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialWorkflowConfig, onWorkflowConfigUpdated }) => {
+  const [activeSubTab, setActiveSubTab] = useState<'WORKFLOW' | 'TELNET' | 'DIRECT'>('WORKFLOW');
+  const [workflowConfig, setWorkflowConfig] = useState<StationWorkflowConfig>(initialWorkflowConfig || {
+    workflowMode: 'DIRECT_5_STEP',
+    plcIpAddress: '192.168.1.50',
+    plcRack: 0,
+    plcSlot: 1,
+    recipeAddress: 'DB48.DBW2',
+    confirmationAddress: 'DB48.DBX4.0',
+    sendConfirmation: true,
+    confirmationValue: true,
+    retryIntervalMs: 1000,
+    displayDelayMs: 2000,
+    autoAdvanceOnSuccess: true,
+    requireCradleQrMatch: false
+  });
+  const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [config, setConfig] = useState<PLCConfiguration>({
     plC_ID: 'PLC_DL02',
     stationCode: 'DL02',
@@ -155,10 +176,37 @@ export const PLCCommunicationView: React.FC = () => {
       if (st) {
         setStatus(st);
       }
+
+      try {
+        const wfCfg = await api.getWorkflowConfig();
+        if (wfCfg) {
+          setWorkflowConfig(wfCfg);
+          if (onWorkflowConfigUpdated) onWorkflowConfigUpdated(wfCfg);
+        }
+      } catch (wfErr) {
+        console.warn('Could not load workflow config:', wfErr);
+      }
     } catch (err) {
       console.error('Error cargando configuración PLC:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveWorkflowConfig = async () => {
+    setSavingWorkflow(true);
+    try {
+      const res = await api.saveWorkflowConfig(workflowConfig);
+      if (res && res.success) {
+        showToast('success', `Flujo operativo actualizado: ${workflowConfig.workflowMode === 'DIRECT_5_STEP' ? '5 Pasos Directo S7' : '6 Pasos Tradicional Robot'}`);
+        if (onWorkflowConfigUpdated) onWorkflowConfigUpdated(workflowConfig);
+      } else {
+        showToast('error', 'Error al guardar la configuración del flujo');
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'Error de red guardando flujo');
+    } finally {
+      setSavingWorkflow(false);
     }
   };
 
@@ -417,6 +465,22 @@ export const PLCCommunicationView: React.FC = () => {
       <div className="flex items-center space-x-3 border-b border-industrial-border pb-2">
         <button
           type="button"
+          onClick={() => setActiveSubTab('WORKFLOW')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center space-x-2 transition ${
+            activeSubTab === 'WORKFLOW'
+              ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-950/40 ring-2 ring-blue-400/40'
+              : 'bg-slate-900/60 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          }`}
+        >
+          <Sliders className="w-4 h-4 text-cyan-300" />
+          <span>Flujo de Secuencia (5 Pasos S7 vs Tradicional)</span>
+          <span className="px-1.5 py-0.5 bg-black/40 rounded text-[9px] text-cyan-300 border border-cyan-500/40 font-mono">
+            {workflowConfig.workflowMode === 'DIRECT_5_STEP' ? '5 PASOS S7' : 'LEGACY ROBOT'}
+          </span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveSubTab('TELNET')}
           className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center space-x-2 transition ${
             activeSubTab === 'TELNET'
@@ -445,7 +509,286 @@ export const PLCCommunicationView: React.FC = () => {
         </button>
       </div>
 
-      {activeSubTab === 'TELNET' ? (
+      {activeSubTab === 'WORKFLOW' ? (
+        <div className="space-y-6 animate-fade-in">
+          {/* Tarjeta Principal de Configuración de Flujo */}
+          <div className="bg-industrial-card border border-industrial-border rounded-2xl p-6 shadow-xl space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-industrial-border pb-4">
+              <div>
+                <h3 className="text-lg font-black text-white flex items-center space-x-2">
+                  <Sliders className="w-5 h-5 text-cyan-400" />
+                  <span>SELECCIÓN Y CONFIGURACIÓN DEL FLUJO OPERATIVO</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Elija el orden de los pasos del sistema y configure los parámetros de transmisión y reintento.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveWorkflowConfig}
+                disabled={savingWorkflow}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-xs shadow-lg shadow-emerald-900/30 flex items-center space-x-2 transition disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                <span>{savingWorkflow ? 'Guardando Flujo...' : 'Guardar y Aplicar Flujo'}</span>
+              </button>
+            </div>
+
+            {/* Selector de Modo con Tarjetas Visuales */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Opción 1: 5 Pasos Directo Siemens S7 */}
+              <div
+                onClick={() => setWorkflowConfig(prev => ({ ...prev, workflowMode: 'DIRECT_5_STEP' }))}
+                className={`p-5 rounded-2xl border-2 cursor-pointer transition-all ${
+                  workflowConfig.workflowMode === 'DIRECT_5_STEP'
+                    ? 'bg-blue-950/70 border-cyan-400 ring-2 ring-cyan-400/40 shadow-xl shadow-cyan-950/50'
+                    : 'bg-slate-900/40 border-slate-700/70 hover:border-slate-600 text-slate-400'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                      workflowConfig.workflowMode === 'DIRECT_5_STEP' ? 'border-cyan-400 bg-cyan-400' : 'border-slate-500'
+                    }`}>
+                      {workflowConfig.workflowMode === 'DIRECT_5_STEP' && <div className="w-2 h-2 rounded-full bg-black"></div>}
+                    </div>
+                    <span className="font-black text-sm text-white">MODO 5 PASOS DIRECTO SIEMENS S7</span>
+                  </div>
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    ACTUAL RECOMENDADO
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-300 mb-3 leading-relaxed">
+                  Secuencia directa optimizada de 5 pasos con comunicación directa S7 al PLC Siemens S7-1500 (DB48) y reintentos automáticos continuos ante No Conforme (NG):
+                </p>
+
+                <ol className="text-xs space-y-2 text-slate-300 font-mono bg-black/40 p-3.5 rounded-xl border border-slate-800">
+                  <li className="flex items-start space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</span>
+                    <span><strong>1. Consulta DB:</strong> Obtiene secuencia, mano y posición automáticamente.</span>
+                  </li>
+                  <li className="flex items-start space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</span>
+                    <span><strong>2. Control Cuna:</strong> 2.a OK pasa a 3; 2.b NG muestra error hasta colocar la correcta.</span>
+                  </li>
+                  <li className="flex items-start space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">3</span>
+                    <span><strong>3. Receta PLC:</strong> Envío de número entero indicando qué hacer (DB48.DBW2).</span>
+                  </li>
+                  <li className="flex items-start space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">4</span>
+                    <span><strong>4. Control Panel:</strong> 4.a OK envía booleano True a DB48.DBX4.0; 4.b NG reintenta.</span>
+                  </li>
+                  <li className="flex items-start space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">5</span>
+                    <span><strong>5. Siguiente Panel:</strong> Commit Produccion_Secuencia y avance automático de orden.</span>
+                  </li>
+                </ol>
+              </div>
+
+              {/* Opción 2: 6 Pasos Tradicional Robot Handshake */}
+              <div
+                onClick={() => setWorkflowConfig(prev => ({ ...prev, workflowMode: 'LEGACY_ROBOT_HANDSHAKE' }))}
+                className={`p-5 rounded-2xl border-2 cursor-pointer transition-all ${
+                  workflowConfig.workflowMode === 'LEGACY_ROBOT_HANDSHAKE'
+                    ? 'bg-indigo-950/70 border-indigo-400 ring-2 ring-indigo-400/40 shadow-xl shadow-indigo-950/50'
+                    : 'bg-slate-900/40 border-slate-700/70 hover:border-slate-600 text-slate-400'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                      workflowConfig.workflowMode === 'LEGACY_ROBOT_HANDSHAKE' ? 'border-indigo-400 bg-indigo-400' : 'border-slate-500'
+                    }`}>
+                      {workflowConfig.workflowMode === 'LEGACY_ROBOT_HANDSHAKE' && <div className="w-2 h-2 rounded-full bg-black"></div>}
+                    </div>
+                    <span className="font-black text-sm text-white">MODO 6 PASOS TRADICIONAL (ROBOT)</span>
+                  </div>
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-slate-700/50 text-slate-300 border border-slate-600">
+                    LEGACY
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-300 mb-3 leading-relaxed">
+                  Flujo original con validación de cuna, lectura estricta de QR, control de panel, verificación PLC Ready, handshake A/B con eco de receta y espera de fin de ciclo robot:
+                </p>
+
+                <ol className="text-xs space-y-2 text-slate-300 font-mono bg-black/40 p-3.5 rounded-xl border border-slate-800">
+                  <li className="flex items-start space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</span>
+                    <span><strong>1. Cuna:</strong> Visión de insertos y mano.</span>
+                  </li>
+                  <li className="flex items-start space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</span>
+                    <span><strong>2. QR Cuna:</strong> Lectura obligatoria de código QR.</span>
+                  </li>
+                  <li className="flex items-start space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">3</span>
+                    <span><strong>3. Panel:</strong> Calidad de clips y componentes.</span>
+                  </li>
+                  <li className="flex items-start space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">4</span>
+                    <span><strong>4. PLC Ready:</strong> Sondeo de celda libre (State=FREE).</span>
+                  </li>
+                  <li className="flex items-start space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">5</span>
+                    <span><strong>5. Receta:</strong> Handshake Recipe_A / Recipe_B con eco.</span>
+                  </li>
+                  <li className="flex items-start space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">6</span>
+                    <span><strong>6. Robot:</strong> Monitoreo de soldadura y fin de ciclo.</span>
+                  </li>
+                </ol>
+              </div>
+            </div>
+
+            {/* Ajustes Detallados del Modo 5 Pasos */}
+            {workflowConfig.workflowMode === 'DIRECT_5_STEP' && (
+              <div className="pt-4 border-t border-slate-800 space-y-4">
+                <h4 className="text-xs font-black text-cyan-300 uppercase tracking-wider flex items-center space-x-2">
+                  <Zap className="w-4 h-4" />
+                  <span>PARÁMETROS DE COMUNICACIÓN S7 Y COMPORTAMIENTO (MODO 5 PASOS)</span>
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* IP PLC */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-300 block mb-1">IP PLC Siemens S7-1500</label>
+                    <input
+                      type="text"
+                      value={workflowConfig.plcIpAddress}
+                      onChange={e => setWorkflowConfig(prev => ({ ...prev, plcIpAddress: e.target.value }))}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono"
+                    />
+                  </div>
+
+                  {/* Dirección Receta */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                      Dirección Receta (Paso 3)
+                    </label>
+                    <input
+                      type="text"
+                      value={workflowConfig.recipeAddress}
+                      onChange={e => setWorkflowConfig(prev => ({ ...prev, recipeAddress: e.target.value }))}
+                      placeholder="DB48.DBW2"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono"
+                    />
+                    <span className="text-[10px] text-slate-400">Escribe entero Int16 (nModeloCamara)</span>
+                  </div>
+
+                  {/* Dirección Confirmación */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                      Dirección Confirmación (Paso 4.a)
+                    </label>
+                    <input
+                      type="text"
+                      value={workflowConfig.confirmationAddress}
+                      onChange={e => setWorkflowConfig(prev => ({ ...prev, confirmationAddress: e.target.value }))}
+                      placeholder="DB48.DBX4.0"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono"
+                    />
+                    <span className="text-[10px] text-slate-400">Escribe bit booleano (bResultadoOK)</span>
+                  </div>
+
+                  {/* Switch Confirmación */}
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-white block">Enviar Confirmación (Paso 4.a)</span>
+                      <span className="text-[10px] text-slate-400">Desactiva el envío del bit si no se requiere</span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={workflowConfig.sendConfirmation}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, sendConfirmation: e.target.checked }))}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                    </label>
+                  </div>
+
+                  {/* Intervalo de reintento NG */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                      Reintento ante NG (Pasos 2.b y 4.b)
+                    </label>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="number"
+                        min="200"
+                        step="100"
+                        value={workflowConfig.retryIntervalMs}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, retryIntervalMs: parseInt(e.target.value) || 1000 }))}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono"
+                      />
+                      <span className="text-xs text-slate-400 font-mono">ms</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400">Pausa entre capturas mientras espera corrección</span>
+                  </div>
+
+                  {/* Tiempo de visualización verde */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                      Visualización OK antes de avanzar (Paso 5)
+                    </label>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="number"
+                        min="500"
+                        step="250"
+                        value={workflowConfig.displayDelayMs}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, displayDelayMs: parseInt(e.target.value) || 2000 }))}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono"
+                      />
+                      <span className="text-xs text-slate-400 font-mono">ms</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400">Tiempo que el HMI muestra verde</span>
+                  </div>
+                </div>
+
+                {/* Toggles Adicionales */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-white block">Avanzar Automáticamente de Panel</span>
+                      <span className="text-[10px] text-slate-400">Avanza el puntero de Produccion_Secuencia al completar OK</span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={workflowConfig.autoAdvanceOnSuccess}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, autoAdvanceOnSuccess: e.target.checked }))}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500"></div>
+                    </label>
+                  </div>
+
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-white block">Exigir Validación QR de Cuna</span>
+                      <span className="text-[10px] text-slate-400">Si está desactivado, solo valida visión física de insertos en Paso 2</span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={workflowConfig.requireCradleQrMatch}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, requireCradleQrMatch: e.target.checked }))}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500"></div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : activeSubTab === 'TELNET' ? (
         <TelnetGatewaySection
           plcConfig={config}
           onActivateAsMainDriver={async () => {

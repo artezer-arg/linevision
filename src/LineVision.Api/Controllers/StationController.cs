@@ -14,6 +14,7 @@ public class StationController : ControllerBase
     private readonly StationOrchestrator _orchestrator;
     private readonly IHealthMonitoringService _healthService;
     private readonly IProductionOrderService _orderService;
+    private readonly IWorkflowConfigService _workflowConfigService;
     private readonly ILogger<StationController> _logger;
 
     public StationController(
@@ -21,12 +22,14 @@ public class StationController : ControllerBase
         StationOrchestrator orchestrator,
         IHealthMonitoringService healthService,
         IProductionOrderService orderService,
+        IWorkflowConfigService workflowConfigService,
         ILogger<StationController> logger)
     {
         _stateMachine = stateMachine;
         _orchestrator = orchestrator;
         _healthService = healthService;
         _orderService = orderService;
+        _workflowConfigService = workflowConfigService;
         _logger = logger;
     }
 
@@ -89,6 +92,20 @@ public class StationController : ControllerBase
     {
         await _stateMachine.RequestEmergencyStopAsync(request.Reason ?? "Operator Emergency Stop button pressed");
         return Ok(new { State = _stateMachine.CurrentState.ToString() });
+    }
+
+    [HttpGet("workflow-config")]
+    public async Task<IActionResult> GetWorkflowConfig()
+    {
+        var config = await _workflowConfigService.GetConfigAsync();
+        return Ok(config);
+    }
+
+    [HttpPost("workflow-config")]
+    public async Task<IActionResult> SaveWorkflowConfig([FromBody] StationWorkflowConfig config)
+    {
+        bool success = await _workflowConfigService.SaveConfigAsync(config);
+        return Ok(new { Success = success, Config = config });
     }
 }
 

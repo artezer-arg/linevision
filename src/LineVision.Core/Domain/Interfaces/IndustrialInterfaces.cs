@@ -221,3 +221,9 @@ public interface IDatabaseService
     Task<int> ExecuteAsync(string sql, object? param = null, CancellationToken ct = default);
     Task<bool> TestConnectionAsync(CancellationToken ct = default);
 }
+
+public interface IWorkflowConfigService
+{
+    Task<StationWorkflowConfig> GetConfigAsync(CancellationToken ct = default);
+    Task<bool> SaveConfigAsync(StationWorkflowConfig config, CancellationToken ct = default);
+}

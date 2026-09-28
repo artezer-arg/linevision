@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ProductionOrder, ProductionCycle, StationHealthStatus, StationState, UserSession } from './types';
+import { ProductionOrder, ProductionCycle, StationHealthStatus, StationState, UserSession, StationWorkflowConfig } from './types';
 import { SignalRService, api } from './services/api';
 import { OperatorHeader } from './components/OperatorHeader';
 import { StateFlowBar } from './components/StateFlowBar';
@@ -17,6 +17,7 @@ export const App: React.FC = () => {
   const [stationState, setStationState] = useState<StationState>('WAITING_ORDER');
   const [order, setOrder] = useState<ProductionOrder | null>(null);
   const [cycle, setCycle] = useState<ProductionCycle | null>(null);
+  const [workflowConfig, setWorkflowConfig] = useState<StationWorkflowConfig | null>(null);
   const [frames, setFrames] = useState<Record<string, string>>({});
   const [health, setHealth] = useState<StationHealthStatus | null>(null);
   const [autoRun, setAutoRun] = useState(true);
@@ -50,6 +51,10 @@ export const App: React.FC = () => {
         setAutoRun(data.isAutoRunEnabled);
         setHealth(data.health);
       }
+    }).catch(console.error);
+
+    api.getWorkflowConfig().then(cfg => {
+      if (cfg) setWorkflowConfig(cfg);
     }).catch(console.error);
 
     return () => signalR.stop();
@@ -101,8 +106,8 @@ export const App: React.FC = () => {
         onEmergencyStop={handleEmergencyStop}
       />
 
-      {/* 2. Barra Visual de Flujo de Secuencia (Cuna -> QR -> Panel -> PLC -> Receta -> Robot) */}
-      <StateFlowBar state={stationState} cycle={cycle} />
+      {/* 2. Barra Visual de Flujo de Secuencia (5 Pasos S7 o 6 Pasos Robot) */}
+      <StateFlowBar state={stationState} cycle={cycle} workflowConfig={workflowConfig} />
 
       {/* 3. Navigation Bar */}
       <nav className="bg-industrial-card border-b border-industrial-border px-4 py-2 flex items-center justify-between">
@@ -251,7 +256,12 @@ export const App: React.FC = () => {
           </div>
         )}
         {activeTab === 'CALIBRATION' && <CalibrationView frames={frames} />}
-        {activeTab === 'PLC_COMM' && <PLCCommunicationView />}
+        {activeTab === 'PLC_COMM' && (
+          <PLCCommunicationView
+            workflowConfig={workflowConfig}
+            onWorkflowConfigUpdated={setWorkflowConfig}
+          />
+        )}
         {activeTab === 'DATABASE' && <DatabaseConfigView />}
         {activeTab === 'TECHNICAL' && <TechnicalView health={health} state={stationState} cycle={cycle} />}
         {activeTab === 'SIMULATORS' && <SimulatorsView />}

@@ -15,7 +15,7 @@ public class CameraDiagnosticTests
         _output = output;
     }
 
-    [Fact]
+    [Fact(Skip = "Diagnostic test requiring physical camera connected via DirectShow")]
     public void TestAllDirectShowIndices()
     {
         string outDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CameraSnapshots");

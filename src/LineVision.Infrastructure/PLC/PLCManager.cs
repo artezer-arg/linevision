@@ -466,6 +466,56 @@ public class PLCManager : IPLCService
         }
     }
 
+    public async Task<S7WriteResult> WriteS7BoolDirectAsync(string ip, string address, bool value, short rack = 0, short slot = 1, CancellationToken ct = default)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var plc = new S7.Net.Plc(S7.Net.CpuType.S71500, ip, rack, slot);
+            await plc.OpenAsync(ct);
+            if (!plc.IsConnected)
+            {
+                return new S7WriteResult
+                {
+                    Success = false,
+                    Message = $"No se pudo conectar al PLC Siemens S7-1500 en {ip}:102 (Rack={rack}, Slot={slot})",
+                    DurationMs = (int)sw.ElapsedMilliseconds
+                };
+            }
+
+            string cleanAddr = address.Split(' ')[0].Trim();
+            await plc.WriteAsync(cleanAddr, value);
+            var readBack = await plc.ReadAsync(cleanAddr);
+            bool verified = Convert.ToBoolean(readBack);
+
+            sw.Stop();
+            return new S7WriteResult
+            {
+                Success = true,
+                IPAddress = ip,
+                Address = cleanAddr,
+                WrittenValue = (short)(value ? 1 : 0),
+                VerifiedValue = (short)(verified ? 1 : 0),
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                Message = $"Confirmación booleana {value} escrita y verificada exitosamente en {cleanAddr} del PLC ({ip}:102)"
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogError(ex, "Error escribiendo bit booleano en Siemens S7 {IP}:{Addr}", ip, address);
+            return new S7WriteResult
+            {
+                Success = false,
+                IPAddress = ip,
+                Address = address,
+                WrittenValue = (short)(value ? 1 : 0),
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                Message = $"Error comunicando con Siemens S7: {ex.Message}"
+            };
+        }
+    }
+
     public async Task<S7RecipeAndConfirmationResult> WriteS7RecipeAndConfirmationAsync(
         string ip,
         short recipe,

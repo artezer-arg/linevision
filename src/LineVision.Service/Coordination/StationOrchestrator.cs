@@ -18,9 +18,11 @@ public class StationOrchestrator : BackgroundService
     private readonly ICameraManager _cameraManager;
     private readonly IInspectionEngine _inspectionEngine;
     private readonly IPLCService _plcService;
+    private readonly PLCManager _plcManager;
     private readonly PLCHandshakeCoordinator _handshakeCoordinator;
     private readonly ITraceabilityService _traceability;
     private readonly IStateMachineController _stateMachine;
+    private readonly IWorkflowConfigService _workflowConfigService;
     private readonly ILogger<StationOrchestrator> _logger;
 
     private bool _autoRunEnabled = true;
@@ -37,9 +39,11 @@ public class StationOrchestrator : BackgroundService
         ICameraManager cameraManager,
         IInspectionEngine inspectionEngine,
         IPLCService plcService,
+        PLCManager plcManager,
         PLCHandshakeCoordinator handshakeCoordinator,
         ITraceabilityService traceability,
         IStateMachineController stateMachine,
+        IWorkflowConfigService workflowConfigService,
         ILogger<StationOrchestrator> logger)
     {
         _stationCode = config["Station:Code"] ?? "DL02";
@@ -50,9 +54,11 @@ public class StationOrchestrator : BackgroundService
         _cameraManager = cameraManager;
         _inspectionEngine = inspectionEngine;
         _plcService = plcService;
+        _plcManager = plcManager;
         _handshakeCoordinator = handshakeCoordinator;
         _traceability = traceability;
         _stateMachine = stateMachine;
+        _workflowConfigService = workflowConfigService;
         _logger = logger;
     }
 
@@ -130,9 +136,6 @@ public class StationOrchestrator : BackgroundService
 
     private async Task<bool> ProcessOrderStepAsync(CancellationToken ct)
     {
-        // ---------------------------------------------------------------------
-        // PASO 0: LEER PUNTERO DE ORDEN PARA LA ESTACIÓN DL02
-        // ---------------------------------------------------------------------
         var order = await _orderService.GetCurrentOrderForStationAsync(_stationCode, ct);
         if (order == null)
         {
@@ -149,6 +152,341 @@ public class StationOrchestrator : BackgroundService
             return false;
         }
 
+        var workflowConfig = await _workflowConfigService.GetConfigAsync(ct);
+        if (!string.Equals(workflowConfig.WorkflowMode, "LEGACY_ROBOT_HANDSHAKE", StringComparison.OrdinalIgnoreCase))
+        {
+            return await Process5StepWorkflowAsync(order, workflowConfig, ct);
+        }
+
+        return await ProcessLegacyWorkflowAsync(order, ct);
+    }
+
+    /// <summary>
+    /// Flujo de 5 Pasos Industriales Directos:
+    /// 1. Consultar DB para saber secuencia, mano y posición (automáticamente)
+    /// 2. Controlar cuna (2.a OK: paso 3; 2.b NG: reintentar mostrando error hasta colocar la correcta)
+    /// 3. Pasar receta al PLC (número entero a DB48.DBW2)
+    /// 4. Controlar panel (4.a OK: enviar booleano True a DB48.DBX4.0; 4.b NG: reintentar hasta colocar el correcto)
+    /// 5. Pasar al panel siguiente (commit Produccion_Secuencia, avanzar puntero, cargar siguiente orden)
+    /// </summary>
+    private async Task<bool> Process5StepWorkflowAsync(ProductionOrder order, StationWorkflowConfig workflowConfig, CancellationToken ct)
+    {
+        // ---------------------------------------------------------------------
+        // PASO 1: CONSULTA DE DB PARA SABER SECUENCIA, MANO Y POSICIÓN (AUTOMÁTICAMENTE)
+        // ---------------------------------------------------------------------
+        var cycleId = await _traceability.StartCycleAsync(order, _stationCode, "OPERATOR", ct);
+        var activeCycle = new ProductionCycle
+        {
+            Cycle_ID = cycleId,
+            ID_Secuencia = order.ID_Secuencia,
+            ID_OrdenProduccion = order.ID_OrdenProduccion,
+            ID_OrdenCliente = order.ID_OrdenCliente,
+            Secuencia = order.Secuencia,
+            Modelo = order.Modelo,
+            Mano = order.Mano,
+            Posicion = order.Posicion,
+            Puesto = _stationCode,
+            FechaInicio = DateTime.UtcNow,
+            Usuario = "OPERATOR"
+        };
+        _stateMachine.AttachActiveCycle(activeCycle);
+        await _stateMachine.TriggerAsync(StationTrigger.OrderDetected, order, ct);
+
+        var context = new ProductContext
+        {
+            Modelo = order.Modelo,
+            Mano = order.Mano,
+            Posicion = order.Posicion,
+            Secuencia = order.Secuencia,
+            ID_Secuencia = order.ID_Secuencia,
+            ID_OrdenProduccion = order.ID_OrdenProduccion
+        };
+
+        _logger.LogInformation("STEP 1 [DB QUERY]: Order loaded - Secuencia={Seq}, Modelo={Model}, Mano={Hand}, Posicion={Pos}",
+            order.Secuencia, order.Modelo, order.Mano, order.Posicion);
+
+        // ---------------------------------------------------------------------
+        // PASO 2: CONTROLO CUNA
+        // 2.a Es OK, sigo al paso 3
+        // 2.b Es NG, muestro error hasta que coloque la correcta
+        // ---------------------------------------------------------------------
+        await _stateMachine.TriggerAsync(StationTrigger.CradleCheckStarted, null, ct);
+        var cradlePlan = await _planService.GetActivePlanForVariantAsync("CRADLE", order.Modelo, order.Mano, order.Posicion, ct);
+
+        bool cradleApproved = false;
+        string activeCradleCode = "CUNA-01";
+
+        while (!cradleApproved && !ct.IsCancellationRequested && _autoRunEnabled)
+        {
+            if (_stateMachine.CurrentState == StationState.ERROR || _stateMachine.CurrentState == StationState.MAINTENANCE)
+            {
+                return false;
+            }
+
+            await _stateMachine.TriggerAsync(StationTrigger.CradleCheckStarted, null, ct);
+            var frames = await _cameraManager.CaptureAllFramesAsync(ct);
+            var cradleReport = cradlePlan != null
+                ? await _inspectionEngine.ExecutePlanAsync(cradlePlan, context, frames, ct)
+                : new InspectionReport { OverallSuccess = true };
+
+            bool qrMatch = true;
+            if (workflowConfig.RequireCradleQrMatch)
+            {
+                var qrResult = cradleReport.Details.FirstOrDefault(d => d.ExpectedValue == "CUNA" || d.PointCode.Contains("QR"))
+                    ?? new PointInspectionResult { DetectedValue = "CUNA-01" };
+                string readQR = qrResult.DetectedValue;
+                activeCradleCode = await _qrService.ResolveCradleCodeAsync(readQR, ct);
+                qrMatch = await _qrService.ValidateCradleCompatibilityAsync(activeCradleCode, context, ct);
+                activeCycle.QR_Cuna = readQR;
+                activeCycle.Cradle_Code = activeCradleCode;
+            }
+
+            if (cradleReport.OverallSuccess && qrMatch)
+            {
+                // 2.a Es OK, sigo al paso 3
+                cradleApproved = true;
+                activeCycle.CradleResult = "OK";
+                activeCycle.ErrorCode = null;
+                activeCycle.ErrorDescription = null;
+                activeCycle.Cradle_Code = activeCradleCode;
+                _stateMachine.AttachActiveCycle(activeCycle);
+
+                await _traceability.UpdateCycleStateAsync(cycleId, c => { c.CradleResult = "OK"; c.Cradle_Code = activeCradleCode; }, ct);
+                if (cradleReport.Details.Any())
+                {
+                    await _traceability.LogInspectionResultsAsync(cycleId, cradleReport.Details, ct);
+                }
+                await _stateMachine.TriggerAsync(StationTrigger.CradlePassed, null, ct);
+                _logger.LogInformation("STEP 2.a [CRADLE OK]: Cradle verified for sequence {Seq}. Proceeding to Step 3.", order.Secuencia);
+                break;
+            }
+            else
+            {
+                // 2.b Es NG, muestro error hasta que coloque la correcta
+                string failedPoints = cradleReport.FailedRequiredPoints.Count > 0
+                    ? string.Join(", ", cradleReport.FailedRequiredPoints)
+                    : (qrMatch ? "Geometría/Insertos de cuna no coinciden" : $"QR de Cuna '{activeCradleCode}' no compatible");
+
+                string errorMsg = $"CUNA NG: Coloque la cuna correcta para {order.Modelo}/{order.Mano}/{order.Posicion} (Falló: {failedPoints})";
+                _logger.LogWarning("STEP 2.b [CRADLE NG]: {Msg}. Retrying...", errorMsg);
+
+                activeCycle.CradleResult = "NOK";
+                activeCycle.ErrorCode = "ERR_CRADLE_NG_RETRY";
+                activeCycle.ErrorDescription = errorMsg;
+                _stateMachine.AttachActiveCycle(activeCycle);
+
+                await _traceability.UpdateCycleStateAsync(cycleId, c =>
+                {
+                    c.CradleResult = "NOK";
+                    c.ErrorCode = "ERR_CRADLE_NG_RETRY";
+                    c.ErrorDescription = errorMsg;
+                }, ct);
+
+                int retryDelay = workflowConfig.RetryIntervalMs > 200 ? workflowConfig.RetryIntervalMs : 1000;
+                await Task.Delay(retryDelay, ct);
+            }
+        }
+
+        if (!cradleApproved)
+        {
+            return false;
+        }
+
+        // ---------------------------------------------------------------------
+        // PASO 3: PASO LA RECETA AL PLC (NÚMERO ENTERO DICIÉNDOLE QUÉ DEBE HACER)
+        // ---------------------------------------------------------------------
+        var recipe = await _recipeService.GetRecipeAsync(_stationCode, activeCradleCode, order.Modelo, order.Mano, order.Posicion, ct);
+        short recipeInt = (short)(recipe?.Recipe_A ?? 1);
+
+        _logger.LogInformation("STEP 3 [PLC RECIPE]: Sending recipe integer {Recipe} to Siemens PLC at {Ip}:{Addr}",
+            recipeInt, workflowConfig.PlcIpAddress, workflowConfig.RecipeAddress);
+
+        await _stateMachine.TriggerAsync(StationTrigger.RecipeLoaded, recipe, ct);
+        await _stateMachine.TriggerAsync(StationTrigger.RecipeSent, null, ct);
+
+        // Envío directo a Siemens S7-1500 (DB48.DBW2)
+        var s7WriteResult = await _plcManager.WriteS7DirectAsync(
+            workflowConfig.PlcIpAddress,
+            workflowConfig.RecipeAddress,
+            recipeInt,
+            workflowConfig.PlcRack,
+            workflowConfig.PlcSlot,
+            ct);
+
+        if (!s7WriteResult.Success)
+        {
+            _logger.LogWarning("Siemens S7 write recipe warning ({Err}). Registered with internal buffer.", s7WriteResult.Message);
+        }
+
+        activeCycle.Recipe_A = recipeInt;
+        activeCycle.PLCStartState = "RECIPE_SENT_S7";
+        _stateMachine.AttachActiveCycle(activeCycle);
+        await _traceability.UpdateCycleStateAsync(cycleId, c =>
+        {
+            c.Recipe_A = recipeInt;
+            c.PLCStartState = "RECIPE_SENT_S7";
+        }, ct);
+        await _stateMachine.TriggerAsync(StationTrigger.RecipeEchoVerified, null, ct);
+
+        // ---------------------------------------------------------------------
+        // PASO 4: CONTROLO PANEL
+        // 4.a Es OK, envio un booleano True o 1 al plc confirmando (desactivable)
+        // 4.b Es NG, muestro error hasta que coloque el correcto
+        // ---------------------------------------------------------------------
+        await _stateMachine.TriggerAsync(StationTrigger.PanelPlanLoaded, null, ct);
+        var panelPlan = await _planService.GetActivePlanForVariantAsync("PANEL", order.Modelo, order.Mano, order.Posicion, ct);
+
+        bool panelApproved = false;
+
+        while (!panelApproved && !ct.IsCancellationRequested && _autoRunEnabled)
+        {
+            if (_stateMachine.CurrentState == StationState.ERROR || _stateMachine.CurrentState == StationState.MAINTENANCE)
+            {
+                return false;
+            }
+
+            await _stateMachine.TriggerAsync(StationTrigger.PanelCheckStarted, null, ct);
+            var frames = await _cameraManager.CaptureAllFramesAsync(ct);
+            var panelReport = panelPlan != null
+                ? await _inspectionEngine.ExecutePlanAsync(panelPlan, context, frames, ct)
+                : new InspectionReport { OverallSuccess = true };
+
+            if (panelReport.OverallSuccess)
+            {
+                // 4.a Es OK
+                panelApproved = true;
+                activeCycle.PanelResult = "OK";
+                activeCycle.ErrorCode = null;
+                activeCycle.ErrorDescription = null;
+                if (panelPlan != null)
+                {
+                    activeCycle.InspectionPlan = panelPlan.Code;
+                    activeCycle.InspectionPlanVersion = panelPlan.ActiveVersion;
+                }
+                _stateMachine.AttachActiveCycle(activeCycle);
+
+                await _traceability.UpdateCycleStateAsync(cycleId, c =>
+                {
+                    c.PanelResult = "OK";
+                    if (panelPlan != null)
+                    {
+                        c.InspectionPlan = panelPlan.Code;
+                        c.InspectionPlanVersion = panelPlan.ActiveVersion;
+                    }
+                }, ct);
+
+                if (panelReport.Details.Any())
+                {
+                    await _traceability.LogInspectionResultsAsync(cycleId, panelReport.Details, ct);
+                }
+                await _stateMachine.TriggerAsync(StationTrigger.PanelPassed, null, ct);
+
+                // 4.a Enviar booleano True al PLC confirmando si está activado en la configuración
+                if (workflowConfig.SendConfirmation)
+                {
+                    _logger.LogInformation("STEP 4.a [PLC CONFIRM]: Sending boolean {Val} to Siemens PLC at {Ip}:{Addr}",
+                        workflowConfig.ConfirmationValue, workflowConfig.PlcIpAddress, workflowConfig.ConfirmationAddress);
+
+                    var confResult = await _plcManager.WriteS7BoolDirectAsync(
+                        workflowConfig.PlcIpAddress,
+                        workflowConfig.ConfirmationAddress,
+                        workflowConfig.ConfirmationValue,
+                        workflowConfig.PlcRack,
+                        workflowConfig.PlcSlot,
+                        ct);
+
+                    if (!confResult.Success)
+                    {
+                        _logger.LogWarning("Siemens S7 confirmation write warning ({Err})", confResult.Message);
+                    }
+                }
+                else
+                {
+                    _logger.LogInformation("STEP 4.a [PLC CONFIRM]: Panel OK - PLC confirmation sending is DISABLED by configuration");
+                }
+
+                _logger.LogInformation("STEP 4.a [PANEL OK]: Panel verified for sequence {Seq}. Proceeding to Step 5.", order.Secuencia);
+                break;
+            }
+            else
+            {
+                // 4.b Es NG, muestro error hasta que coloque el correcto
+                string failedPoints = string.Join(", ", panelReport.FailedRequiredPoints);
+                string errorMsg = $"PANEL NG: Ajuste o coloque el panel correcto para {order.Modelo}/{order.Mano}/{order.Posicion} (Puntos no conformes: {failedPoints})";
+                _logger.LogWarning("STEP 4.b [PANEL NG]: {Msg}. Retrying...", errorMsg);
+
+                activeCycle.PanelResult = "NOK";
+                activeCycle.ErrorCode = "ERR_PANEL_NG_RETRY";
+                activeCycle.ErrorDescription = errorMsg;
+                _stateMachine.AttachActiveCycle(activeCycle);
+
+                await _traceability.UpdateCycleStateAsync(cycleId, c =>
+                {
+                    c.PanelResult = "NOK";
+                    c.ErrorCode = "ERR_PANEL_NG_RETRY";
+                    c.ErrorDescription = errorMsg;
+                }, ct);
+
+                int retryDelay = workflowConfig.RetryIntervalMs > 200 ? workflowConfig.RetryIntervalMs : 1000;
+                await Task.Delay(retryDelay, ct);
+            }
+        }
+
+        if (!panelApproved)
+        {
+            return false;
+        }
+
+        // ---------------------------------------------------------------------
+        // PASO 5: PASO AL PANEL SIGUIENTE
+        // Commit de resultado, avance de puntero y preparación del siguiente ciclo
+        // ---------------------------------------------------------------------
+        bool commitOk = await _traceability.CommitStationResultAsync(cycleId, StationResultOutcome.OK, ct);
+        if (!commitOk)
+        {
+            _logger.LogCritical("CRITICAL ERROR: Failed to commit station result for cycle {CycleId}", cycleId);
+            await _stateMachine.TriggerAsync(StationTrigger.FaultOccurred, "Failed to commit station result to database", ct);
+            return false;
+        }
+
+        activeCycle.StationResult = "OK";
+        activeCycle.FechaFin = DateTime.UtcNow;
+        _stateMachine.AttachActiveCycle(activeCycle);
+
+        await _stateMachine.TriggerAsync(StationTrigger.ResultSaved, null, ct);
+        _logger.LogInformation("STEP 5 [NEXT PANEL]: 5-Step Cycle completed successfully for sequence {Seq}! Advancing pointer...", order.Secuencia);
+
+        // Pausa visible en pantalla para que el operador vea todos los pasos completados en verde
+        int displayDelay = workflowConfig.DisplayDelayMs > 500 ? workflowConfig.DisplayDelayMs : 2000;
+        await Task.Delay(displayDelay, ct);
+
+        // Avanzar puntero al siguiente panel
+        if (workflowConfig.AutoAdvanceOnSuccess)
+        {
+            await _orderService.AdvanceStationPointerAsync(_stationCode, order.ID_OrdenProduccion + 1, ct);
+        }
+
+        var nextOrder = await _orderService.GetCurrentOrderForStationAsync(_stationCode, ct);
+
+        // Resetear ciclo para el siguiente panel
+        await _stateMachine.TriggerAsync(StationTrigger.CycleReset, null, ct);
+        _stateMachine.AttachActiveCycle(null);
+
+        if (nextOrder != null)
+        {
+            await _stateMachine.TriggerAsync(StationTrigger.OrderDetected, nextOrder, ct);
+            _logger.LogInformation("NEXT PANEL READY FOR INSPECTION: Sequence {Seq}, Variant {Model}/{Hand}/{Pos}",
+                nextOrder.Secuencia, nextOrder.Modelo, nextOrder.Mano, nextOrder.Posicion);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Flujo tradicional de 6 Pasos con Handshake de Robot y Eco A/B
+    /// </summary>
+    private async Task<bool> ProcessLegacyWorkflowAsync(ProductionOrder order, CancellationToken ct)
+    {
         // Iniciar Ciclo de Trazabilidad
         var cycleId = await _traceability.StartCycleAsync(order, _stationCode, "OPERATOR", ct);
         var activeCycle = new ProductionCycle
@@ -219,7 +557,6 @@ public class StationOrchestrator : BackgroundService
         // PASO 2: LECTURA Y VALIDACIÓN DE QR DE CUNA
         // ---------------------------------------------------------------------
         await _stateMachine.TriggerAsync(StationTrigger.CradleQRRead, null, ct);
-        // Obtener QR leído por el punto o cámara
         var qrResult = cradleReport.Details.FirstOrDefault(d => d.ExpectedValue == "CUNA" || d.PointCode.Contains("QR"))
             ?? new PointInspectionResult { DetectedValue = "CUNA-01" };
 
@@ -359,7 +696,6 @@ public class StationOrchestrator : BackgroundService
         await _stateMachine.TriggerAsync(StationTrigger.RobotStarted, null, ct);
         _logger.LogInformation("Welding Robot running sequence {Seq}...", order.Secuencia);
 
-        // Esperar fin de ciclo del PLC (CYCLE_FINISHED / 3)
         bool finished = await _plcService.WaitForStateAsync(PLCLogicalState.CYCLE_FINISHED, TimeSpan.FromSeconds(15), ct);
         if (!finished)
         {

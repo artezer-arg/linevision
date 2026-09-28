@@ -158,23 +158,40 @@ public class StateMachineController : IStateMachineController
             (StationState.ORDER_LOADED, StationTrigger.OrderDetected) => StationState.ORDER_LOADED,
             (StationState.ORDER_LOADED, StationTrigger.CradleCheckStarted) => StationState.CHECKING_CRADLE,
             
+            // Inspección de cuna y reintentos (Paso 2)
+            (StationState.CHECKING_CRADLE, StationTrigger.CradleCheckStarted) => StationState.CHECKING_CRADLE,
             (StationState.CHECKING_CRADLE, StationTrigger.CradlePassed) => StationState.CRADLE_OK,
             (StationState.CHECKING_CRADLE, StationTrigger.CradleFailed) => StationState.ERROR,
 
             (StationState.CRADLE_OK, StationTrigger.CradleQRRead) => StationState.CHECKING_CRADLE_QR,
+            (StationState.CHECKING_CRADLE_QR, StationTrigger.CradleCheckStarted) => StationState.CHECKING_CRADLE,
             (StationState.CHECKING_CRADLE_QR, StationTrigger.CradleQRMatched) => StationState.CRADLE_QR_OK,
             (StationState.CHECKING_CRADLE_QR, StationTrigger.CradleQRMismatched) => StationState.ERROR,
 
+            // Flujo tradicional: Cuna -> Panel
             (StationState.CRADLE_QR_OK, StationTrigger.PanelPlanLoaded) => StationState.LOADING_PANEL_INSPECTION_PLAN,
-            (StationState.LOADING_PANEL_INSPECTION_PLAN, StationTrigger.PanelCheckStarted) => StationState.CHECKING_PANEL,
+            (StationState.CRADLE_QR_OK, StationTrigger.PanelCheckStarted) => StationState.CHECKING_PANEL,
+            (StationState.CRADLE_OK, StationTrigger.PanelPlanLoaded) => StationState.LOADING_PANEL_INSPECTION_PLAN,
+            (StationState.CRADLE_OK, StationTrigger.PanelCheckStarted) => StationState.CHECKING_PANEL,
 
+            // Flujo 5 Pasos Directo: Cuna OK -> Receta PLC (Paso 3)
+            (StationState.CRADLE_OK, StationTrigger.RecipeLoaded) => StationState.LOADING_RECIPE,
+            (StationState.CRADLE_OK, StationTrigger.RecipeSent) => StationState.SENDING_RECIPE,
+            (StationState.CRADLE_QR_OK, StationTrigger.RecipeLoaded) => StationState.LOADING_RECIPE,
+            (StationState.CRADLE_QR_OK, StationTrigger.RecipeSent) => StationState.SENDING_RECIPE,
+
+            // Inspección de panel y reintentos (Paso 4 en 5-Pasos / Paso 3 en tradicional)
+            (StationState.LOADING_PANEL_INSPECTION_PLAN, StationTrigger.PanelCheckStarted) => StationState.CHECKING_PANEL,
+            (StationState.CHECKING_PANEL, StationTrigger.PanelCheckStarted) => StationState.CHECKING_PANEL,
             (StationState.CHECKING_PANEL, StationTrigger.PanelPassed) => StationState.PANEL_OK,
             (StationState.CHECKING_PANEL, StationTrigger.PanelFailed) => StationState.ERROR,
 
+            // Flujo tradicional: Panel OK -> PLC Ready -> Receta
             (StationState.PANEL_OK, StationTrigger.PLCPollReady) => StationState.WAITING_PLC,
             (StationState.WAITING_PLC, StationTrigger.PLCPollReady) => StationState.PLC_READY,
-
             (StationState.PLC_READY, StationTrigger.RecipeLoaded) => StationState.LOADING_RECIPE,
+
+            // Carga y envío de receta
             (StationState.LOADING_RECIPE, StationTrigger.RecipeSent) => StationState.SENDING_RECIPE,
             (StationState.SENDING_RECIPE, StationTrigger.RecipeSent) => StationState.WAITING_RECIPE_CONFIRMATION,
             (StationState.SENDING_RECIPE, StationTrigger.RecipeEchoVerified) => StationState.RECIPE_CONFIRMED,
@@ -183,13 +200,23 @@ public class StateMachineController : IStateMachineController
             (StationState.WAITING_RECIPE_CONFIRMATION, StationTrigger.RecipeEchoVerified) => StationState.RECIPE_CONFIRMED,
             (StationState.WAITING_RECIPE_CONFIRMATION, StationTrigger.RecipeEchoMismatch) => StationState.ERROR,
 
+            // Flujo 5 Pasos: Receta Confirmada -> Inspección de Panel (Paso 4)
+            (StationState.RECIPE_CONFIRMED, StationTrigger.PanelPlanLoaded) => StationState.LOADING_PANEL_INSPECTION_PLAN,
+            (StationState.RECIPE_CONFIRMED, StationTrigger.PanelCheckStarted) => StationState.CHECKING_PANEL,
+
+            // Flujo 5 Pasos: Panel OK -> Guardar resultado (Paso 5)
+            (StationState.PANEL_OK, StationTrigger.ResultSaved) => StationState.SAVING_STATION_RESULT,
+
+            // Flujo tradicional: Receta Confirmada -> Robot
             (StationState.RECIPE_CONFIRMED, StationTrigger.RobotStarted) => StationState.ROBOT_RUNNING,
             (StationState.ROBOT_RUNNING, StationTrigger.RobotStarted) => StationState.WAITING_ROBOT_FINISH,
             (StationState.ROBOT_RUNNING, StationTrigger.RobotFinished) => StationState.SAVING_STATION_RESULT,
             (StationState.WAITING_ROBOT_FINISH, StationTrigger.RobotFinished) => StationState.SAVING_STATION_RESULT,
 
+            // Finalización y reinicio de ciclo
             (StationState.SAVING_STATION_RESULT, StationTrigger.ResultSaved) => StationState.CYCLE_COMPLETE,
             (StationState.CYCLE_COMPLETE, StationTrigger.CycleReset) => StationState.WAITING_ORDER,
+            (StationState.CYCLE_COMPLETE, StationTrigger.OrderDetected) => StationState.ORDER_LOADED,
 
             _ => null // Transición inválida / Salto de estado no permitido
         };

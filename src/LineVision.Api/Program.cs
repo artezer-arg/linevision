@@ -22,6 +22,7 @@ builder.Services.AddSingleton<IProductionOrderService, ProductionOrderService>()
 builder.Services.AddSingleton<ITraceabilityService, TraceabilityService>();
 builder.Services.AddSingleton<IRecipeService, RecipeService>();
 builder.Services.AddSingleton<ICradleQRService, CradleQRService>();
+builder.Services.AddSingleton<IWorkflowConfigService, WorkflowConfigService>();
 builder.Services.AddSingleton<IInspectionPlanService, InspectionPlanService>();
 builder.Services.AddSingleton<IAuthenticationService, AuthenticationService>();
 

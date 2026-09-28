@@ -160,4 +160,71 @@ public class StateMachineTests
             It.Is<BypassRecord>(b => b.User == "ENG01" && b.TargetState == StationState.MAINTENANCE && b.Reason == "Routine calibration"),
             It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task Direct5StepSequence_ShouldProgressStepByStep()
+    {
+        var order = new ProductionOrder { Secuencia = "0383", Modelo = "P1B", Mano = "RH", Posicion = "FRONT" };
+
+        // 1. Consult DB -> Order detected
+        var ok1 = await _stateMachine.TriggerAsync(StationTrigger.OrderDetected, order);
+        ok1.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.ORDER_LOADED);
+
+        // 2. Control Cradle (Cuna)
+        var ok2 = await _stateMachine.TriggerAsync(StationTrigger.CradleCheckStarted);
+        ok2.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.CHECKING_CRADLE);
+
+        // 2.b Retry simulation (remain in checking)
+        var okRetry = await _stateMachine.TriggerAsync(StationTrigger.CradleCheckStarted);
+        okRetry.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.CHECKING_CRADLE);
+
+        // 2.a Cradle OK
+        var ok3 = await _stateMachine.TriggerAsync(StationTrigger.CradlePassed);
+        ok3.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.CRADLE_OK);
+
+        // 3. Send Recipe to PLC
+        var ok4 = await _stateMachine.TriggerAsync(StationTrigger.RecipeLoaded);
+        ok4.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.LOADING_RECIPE);
+
+        var ok5 = await _stateMachine.TriggerAsync(StationTrigger.RecipeSent);
+        ok5.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.SENDING_RECIPE);
+
+        var ok6 = await _stateMachine.TriggerAsync(StationTrigger.RecipeEchoVerified);
+        ok6.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.RECIPE_CONFIRMED);
+
+        // 4. Control Panel
+        var ok7 = await _stateMachine.TriggerAsync(StationTrigger.PanelCheckStarted);
+        ok7.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.CHECKING_PANEL);
+
+        // 4.b Retry simulation
+        var okRetryPanel = await _stateMachine.TriggerAsync(StationTrigger.PanelCheckStarted);
+        okRetryPanel.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.CHECKING_PANEL);
+
+        // 4.a Panel OK (and confirmation sent)
+        var ok8 = await _stateMachine.TriggerAsync(StationTrigger.PanelPassed);
+        ok8.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.PANEL_OK);
+
+        // 5. Next panel (commit and reset)
+        var ok9 = await _stateMachine.TriggerAsync(StationTrigger.ResultSaved);
+        ok9.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.SAVING_STATION_RESULT);
+
+        var ok10 = await _stateMachine.TriggerAsync(StationTrigger.ResultSaved);
+        ok10.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.CYCLE_COMPLETE);
+
+        var ok11 = await _stateMachine.TriggerAsync(StationTrigger.CycleReset);
+        ok11.Should().BeTrue();
+        _stateMachine.CurrentState.Should().Be(StationState.WAITING_ORDER);
+    }
 }

@@ -1,5 +1,5 @@
 import * as signalR from '@microsoft/signalr';
-import { ProductionOrder, ProductionCycle, StationHealthStatus, StationState, UserSession } from '../types';
+import { ProductionOrder, ProductionCycle, StationHealthStatus, StationState, UserSession, StationWorkflowConfig } from '../types';
 
 const API_BASE = typeof window !== 'undefined' && window.location.port === '5173'
   ? 'http://localhost:5000' 
@@ -539,6 +539,20 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enable, port })
+    });
+    return await res.json();
+  },
+
+  async getWorkflowConfig(): Promise<StationWorkflowConfig> {
+    const res = await fetch(`${API_BASE}/api/station/workflow-config`);
+    return await res.json();
+  },
+
+  async saveWorkflowConfig(config: StationWorkflowConfig): Promise<{ success: boolean; config: StationWorkflowConfig }> {
+    const res = await fetch(`${API_BASE}/api/station/workflow-config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
     });
     return await res.json();
   }

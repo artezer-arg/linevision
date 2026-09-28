@@ -304,3 +304,18 @@ export interface TelnetLogEntry {
   content: string;
 }
 
+export interface StationWorkflowConfig {
+  workflowMode: 'DIRECT_5_STEP' | 'LEGACY_ROBOT_HANDSHAKE';
+  plcIpAddress: string;
+  plcRack: number;
+  plcSlot: number;
+  recipeAddress: string;
+  confirmationAddress: string;
+  sendConfirmation: boolean;
+  confirmationValue: boolean;
+  retryIntervalMs: number;
+  displayDelayMs: number;
+  autoAdvanceOnSuccess: boolean;
+  requireCradleQrMatch: boolean;
+}
+

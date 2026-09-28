@@ -7,7 +7,7 @@ namespace LineVision.Tests.Unit;
 
 public class CameraDiscoveryTests
 {
-    [Fact]
+    [Fact(Skip = "Discovery test requiring physical video capture devices")]
     public void Test_OpenCvVideoCapture_Discovery()
     {
         // Test discovering video devices using OpenCv VideoCapture

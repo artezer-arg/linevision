@@ -206,3 +206,66 @@ public class TelnetLogEntry
     public string Content { get; set; } = string.Empty;
 }
 
+public class StationWorkflowConfig
+{
+    /// <summary>
+    /// Modo de operación: "DIRECT_5_STEP" o "LEGACY_ROBOT_HANDSHAKE"
+    /// </summary>
+    public string WorkflowMode { get; set; } = "DIRECT_5_STEP";
+
+    /// <summary>
+    /// IP del PLC Siemens
+    /// </summary>
+    public string PlcIpAddress { get; set; } = "192.168.1.50";
+
+    /// <summary>
+    /// Rack de la CPU Siemens (default 0)
+    /// </summary>
+    public short PlcRack { get; set; } = 0;
+
+    /// <summary>
+    /// Slot de la CPU Siemens (default 1 para S7-1500)
+    /// </summary>
+    public short PlcSlot { get; set; } = 1;
+
+    /// <summary>
+    /// Dirección del bloque de datos y offset para la receta (ej. DB48.DBW2)
+    /// </summary>
+    public string RecipeAddress { get; set; } = "DB48.DBW2";
+
+    /// <summary>
+    /// Dirección del bloque de datos y bit para la confirmación (ej. DB48.DBX4.0)
+    /// </summary>
+    public string ConfirmationAddress { get; set; } = "DB48.DBX4.0";
+
+    /// <summary>
+    /// Habilita o deshabilita el envío del booleano de confirmación en el Paso 4.a
+    /// </summary>
+    public bool SendConfirmation { get; set; } = true;
+
+    /// <summary>
+    /// Valor del booleano de confirmación enviado en caso de OK (default true)
+    /// </summary>
+    public bool ConfirmationValue { get; set; } = true;
+
+    /// <summary>
+    /// Intervalo en milisegundos para reintentar la inspección cuando da NG (Paso 2.b y 4.b)
+    /// </summary>
+    public int RetryIntervalMs { get; set; } = 1000;
+
+    /// <summary>
+    /// Tiempo de visualización de resultado en verde antes de avanzar al siguiente panel (ms)
+    /// </summary>
+    public int DisplayDelayMs { get; set; } = 2000;
+
+    /// <summary>
+    /// Avanzar automáticamente al siguiente panel al completar con éxito
+    /// </summary>
+    public bool AutoAdvanceOnSuccess { get; set; } = true;
+
+    /// <summary>
+    /// Permite saltar validación QR de cuna si no hay código configurado
+    /// </summary>
+    public bool RequireCradleQrMatch { get; set; } = false;
+}
+
