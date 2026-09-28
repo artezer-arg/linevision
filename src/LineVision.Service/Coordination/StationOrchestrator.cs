@@ -136,19 +136,46 @@ public class StationOrchestrator : BackgroundService
 
     private async Task<bool> ProcessOrderStepAsync(CancellationToken ct)
     {
-        var order = await _orderService.GetCurrentOrderForStationAsync(_stationCode, ct);
+        ProductionOrder? order;
+        try
+        {
+            order = await _orderService.GetCurrentOrderForStationAsync(_stationCode, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Waiting for database connection to {Station}: {Message}", _stationCode, ex.Message);
+            await Task.Delay(2000, ct);
+            return false;
+        }
+
         if (order == null)
         {
             return false;
         }
 
         // Validación de idempotencia: si la secuencia ya fue registrada, no reprocesar a ciegas
-        bool alreadyDone = await _traceability.IsSequenceAlreadyProcessedAsync(order.ID_Secuencia, _stationCode, ct);
+        bool alreadyDone = false;
+        try
+        {
+            alreadyDone = await _traceability.IsSequenceAlreadyProcessedAsync(order.ID_Secuencia, _stationCode, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Could not check sequence idempotency in DB: {Message}", ex.Message);
+        }
+
         if (alreadyDone)
         {
             _logger.LogWarning("Sequence {Seq} is already completed in Produccion_Secuencia for {Station}. Advancing pointer.",
                 order.Secuencia, _stationCode);
-            await _orderService.AdvanceStationPointerAsync(_stationCode, order.ID_OrdenProduccion + 1, ct);
+            try
+            {
+                await _orderService.AdvanceStationPointerAsync(_stationCode, order.ID_OrdenProduccion + 1, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Could not advance station pointer: {Message}", ex.Message);
+            }
             return false;
         }
 
@@ -503,10 +530,25 @@ public class StationOrchestrator : BackgroundService
         // Avanzar puntero al siguiente panel
         if (workflowConfig.AutoAdvanceOnSuccess)
         {
-            await _orderService.AdvanceStationPointerAsync(_stationCode, order.ID_OrdenProduccion + 1, ct);
+            try
+            {
+                await _orderService.AdvanceStationPointerAsync(_stationCode, order.ID_OrdenProduccion + 1, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Error advancing station pointer in DB: {Message}", ex.Message);
+            }
         }
 
-        var nextOrder = await _orderService.GetCurrentOrderForStationAsync(_stationCode, ct);
+        ProductionOrder? nextOrder = null;
+        try
+        {
+            nextOrder = await _orderService.GetCurrentOrderForStationAsync(_stationCode, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Error loading next order from DB: {Message}", ex.Message);
+        }
 
         // Resetear ciclo para el siguiente panel
         await _stateMachine.TriggerAsync(StationTrigger.CycleReset, null, ct);

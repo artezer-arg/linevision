@@ -24,9 +24,11 @@ public class DatabaseService : IDatabaseService
     {
         _logger = logger;
         _config = config;
-        _providerName = config["Database:Provider"] ?? "Sqlite";
-        _connectionString = config.GetConnectionString("DefaultConnection") 
-            ?? "Data Source=LineVision_DL02.db";
+        _providerName = config["Database:Provider"] ?? "SqlServer";
+        _connectionString = CleanConnectionString(
+            config.GetConnectionString("DefaultConnection") 
+            ?? config["Database:DefaultConnection"]
+            ?? "Server=172.17.132.153;Database=TB-L;User Id=sa;Password=1enelMundo!;TrustServerCertificate=True;Connect Timeout=15;");
         
         LoadPersistedConfig();
 
@@ -46,7 +48,7 @@ public class DatabaseService : IDatabaseService
                 if (saved != null && !string.IsNullOrWhiteSpace(saved.Provider) && !string.IsNullOrWhiteSpace(saved.ConnectionString))
                 {
                     _providerName = saved.Provider;
-                    _connectionString = saved.ConnectionString;
+                    _connectionString = CleanConnectionString(saved.ConnectionString);
                     _logger.LogInformation("Loaded persisted database config: Provider={Provider}, ConnectionString={ConnStr}",
                         _providerName, MaskConnectionString(_connectionString));
                 }
@@ -67,6 +69,33 @@ public class DatabaseService : IDatabaseService
     {
         if (string.IsNullOrEmpty(connStr)) return string.Empty;
         return System.Text.RegularExpressions.Regex.Replace(connStr, "(Password|pwd)=[^;]+", "$1=••••••••", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
+    public static string CleanConnectionString(string? connStr)
+    {
+        if (string.IsNullOrWhiteSpace(connStr)) return string.Empty;
+        var cleaned = connStr.Trim();
+        // Normaliza error tipográfico habitual de planta: "Connect meout=15" -> "Connect Timeout=15"
+        cleaned = System.Text.RegularExpressions.Regex.Replace(
+            cleaned,
+            @"Connect\s*meout",
+            "Connect Timeout",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return cleaned;
+    }
+
+    private string ExtractCurrentPassword()
+    {
+        try
+        {
+            if (string.Equals(_providerName, "SqlServer", StringComparison.OrdinalIgnoreCase))
+            {
+                var builder = new SqlConnectionStringBuilder(_connectionString);
+                return builder.Password;
+            }
+        }
+        catch { }
+        return "1enelMundo!";
     }
 
     public IDbConnection CreateConnection()
@@ -138,26 +167,28 @@ public class DatabaseService : IDatabaseService
                 builder.IntegratedSecurity = config.IntegratedSecurity;
                 if (!config.IntegratedSecurity)
                 {
-                    builder.UserID = config.Username ?? "sa";
-                    builder.Password = config.Password ?? string.Empty;
+                    builder.UserID = !string.IsNullOrWhiteSpace(config.Username) ? config.Username : "sa";
+                    builder.Password = !string.IsNullOrEmpty(config.Password) && config.Password != "••••••••" 
+                        ? config.Password 
+                        : "1enelMundo!";
                 }
                 builder.TrustServerCertificate = config.TrustServerCertificate;
                 builder.ConnectTimeout = config.ConnectionTimeout > 0 ? config.ConnectionTimeout : 15;
-                return builder.ConnectionString;
+                return CleanConnectionString(builder.ConnectionString);
             }
             return string.IsNullOrWhiteSpace(config.ConnectionString) 
-                ? "Server=localhost;Database=LineVision_DL02;Integrated Security=true;TrustServerCertificate=true;"
-                : config.ConnectionString;
+                ? "Server=172.17.132.153;Database=TB-L;User Id=sa;Password=1enelMundo!;TrustServerCertificate=True;Connect Timeout=15;"
+                : CleanConnectionString(config.ConnectionString);
         }
         else
         {
-            if (!string.IsNullOrWhiteSpace(config.DatabaseName) && !config.DatabaseName.StartsWith("Data Source="))
+            if (!string.IsNullOrWhiteSpace(config.DatabaseName) && !config.DatabaseName.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase))
             {
                 return $"Data Source={config.DatabaseName}";
             }
             return string.IsNullOrWhiteSpace(config.ConnectionString)
                 ? "Data Source=LineVision_DL02.db"
-                : config.ConnectionString;
+                : CleanConnectionString(config.ConnectionString);
         }
     }
 
@@ -168,10 +199,27 @@ public class DatabaseService : IDatabaseService
         string targetProvider = string.Equals(config.Provider, "SqlServer", StringComparison.OrdinalIgnoreCase)
             ? "SqlServer"
             : "Sqlite";
-        
-        string targetConnStr = BuildConnectionString(config);
 
-        // Verify connection before applying
+        // Recover password if masked or missing
+        if (targetProvider == "SqlServer" && !config.IntegratedSecurity)
+        {
+            if (string.IsNullOrWhiteSpace(config.Password) || config.Password == "••••••••")
+            {
+                config.Password = ExtractCurrentPassword();
+            }
+            if (!string.IsNullOrWhiteSpace(config.ConnectionString) && config.ConnectionString.Contains("••••••••"))
+            {
+                config.ConnectionString = System.Text.RegularExpressions.Regex.Replace(
+                    config.ConnectionString,
+                    @"(Password|pwd)=••••••••",
+                    $"$1={config.Password}",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
+        }
+        
+        string targetConnStr = CleanConnectionString(BuildConnectionString(config));
+
+        // Verify connection before applying (non-blocking for pre-configuring while offline)
         var test = await TestConnectionAsync(new DatabaseConnectionConfig
         {
             Provider = targetProvider,
@@ -180,8 +228,7 @@ public class DatabaseService : IDatabaseService
 
         if (!test.Success)
         {
-            _logger.LogError("Cannot apply database config. Test failed: {Msg}", test.Message);
-            return false;
+            _logger.LogWarning("Applied database config while offline/unreachable: {Msg}", test.Message);
         }
 
         lock (_lock)
@@ -216,8 +263,11 @@ public class DatabaseService : IDatabaseService
 
         _logger.LogInformation("Database connection updated successfully to {Provider} ({Conn})", targetProvider, MaskConnectionString(targetConnStr));
 
-        // Safely verify or initialize tables on the new database without deleting anything
-        await InitializeOrUpdateSchemaAsync(seedDataIfEmpty: true, ct);
+        // Safely verify or initialize tables if connection succeeded
+        if (test.Success)
+        {
+            await InitializeOrUpdateSchemaAsync(seedDataIfEmpty: true, ct);
+        }
 
         return true;
     }
@@ -419,22 +469,87 @@ public class DatabaseService : IDatabaseService
         return test.Success;
     }
 
+    public string NormalizeSqlForProvider(string sql)
+    {
+        if (string.IsNullOrWhiteSpace(sql)) return sql;
+        if (!string.Equals(_providerName, "SqlServer", StringComparison.OrdinalIgnoreCase))
+        {
+            return sql;
+        }
+
+        string result = sql;
+
+        // 1. LIMIT conversion to TOP for SqlServer
+        var limitMatch = System.Text.RegularExpressions.Regex.Match(
+            result, 
+            @"\bLIMIT\s+(@?\w+)\s*;?\s*$", 
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
+            
+        if (limitMatch.Success)
+        {
+            string limitVal = limitMatch.Groups[1].Value;
+            result = result.Substring(0, limitMatch.Index).TrimEnd();
+            if (result.EndsWith(";")) result = result.Substring(0, result.Length - 1);
+            result = System.Text.RegularExpressions.Regex.Replace(
+                result, 
+                @"^(\s*SELECT\s+(?:DISTINCT\s+)?)", 
+                $"$1TOP ({limitVal}) ", 
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
+        // 2. String concatenation || to + for SqlServer
+        if (result.Contains("||"))
+        {
+            result = result.Replace("||", "+");
+        }
+
+        // 3. INSERT OR REPLACE conversion to T-SQL DELETE + INSERT
+        if (result.Contains("INSERT OR REPLACE INTO", StringComparison.OrdinalIgnoreCase))
+        {
+            if (result.Contains("INTO Camera", StringComparison.OrdinalIgnoreCase))
+            {
+                result = "DELETE FROM Camera WHERE CameraId = @CameraId;\n" + 
+                         System.Text.RegularExpressions.Regex.Replace(result, @"INSERT\s+OR\s+REPLACE\s+INTO", "INSERT INTO", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
+            else if (result.Contains("INTO PLCConfiguration", StringComparison.OrdinalIgnoreCase))
+            {
+                result = "DELETE FROM PLCConfiguration WHERE PLC_ID = @PLC_ID;\n" + 
+                         System.Text.RegularExpressions.Regex.Replace(result, @"INSERT\s+OR\s+REPLACE\s+INTO", "INSERT INTO", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
+            else if (result.Contains("INTO CradleQR", StringComparison.OrdinalIgnoreCase))
+            {
+                result = "DELETE FROM CradleQR WHERE QR_ID = @QR_ID;\n" + 
+                         System.Text.RegularExpressions.Regex.Replace(result, @"INSERT\s+OR\s+REPLACE\s+INTO", "INSERT INTO", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
+            else if (result.Contains("INTO InspectionPoint", StringComparison.OrdinalIgnoreCase))
+            {
+                result = "DELETE FROM InspectionPoint WHERE InspectionPoint_ID = @newPtId;\n" + 
+                         System.Text.RegularExpressions.Regex.Replace(result, @"INSERT\s+OR\s+REPLACE\s+INTO", "INSERT INTO", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
+        }
+
+        return result;
+    }
+
     public async Task<T?> QuerySingleOrDefaultAsync<T>(string sql, object? param = null, CancellationToken ct = default)
     {
+        var normalizedSql = NormalizeSqlForProvider(sql);
         using var conn = CreateConnection();
-        return await conn.QuerySingleOrDefaultAsync<T>(new CommandDefinition(sql, param, cancellationToken: ct));
+        return await conn.QuerySingleOrDefaultAsync<T>(new CommandDefinition(normalizedSql, param, cancellationToken: ct));
     }
 
     public async Task<IEnumerable<T>> QueryAsync<T>(string sql, object? param = null, CancellationToken ct = default)
     {
+        var normalizedSql = NormalizeSqlForProvider(sql);
         using var conn = CreateConnection();
-        return await conn.QueryAsync<T>(new CommandDefinition(sql, param, cancellationToken: ct));
+        return await conn.QueryAsync<T>(new CommandDefinition(normalizedSql, param, cancellationToken: ct));
     }
 
     public async Task<int> ExecuteAsync(string sql, object? param = null, CancellationToken ct = default)
     {
+        var normalizedSql = NormalizeSqlForProvider(sql);
         using var conn = CreateConnection();
-        return await conn.ExecuteAsync(new CommandDefinition(sql, param, cancellationToken: ct));
+        return await conn.ExecuteAsync(new CommandDefinition(normalizedSql, param, cancellationToken: ct));
     }
 
     private void EnsureInitialized()
@@ -442,6 +557,31 @@ public class DatabaseService : IDatabaseService
         if (string.Equals(_providerName, "Sqlite", StringComparison.OrdinalIgnoreCase))
         {
             InitializeSqliteSchema();
+        }
+        else
+        {
+            // Non-blocking schema verification for SQL Server on startup
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(1000);
+                    var test = await TestConnectionAsync(config: null, CancellationToken.None);
+                    if (test.Success)
+                    {
+                        _logger.LogInformation("SQL Server connection verified on startup. Initializing schema if needed...");
+                        await InitializeOrUpdateSchemaAsync(seedDataIfEmpty: true, CancellationToken.None);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("SQL Server not reachable on startup ({Msg}). Operating in offline resilient mode.", test.Message);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not complete startup schema check for SQL Server");
+                }
+            });
         }
     }
 

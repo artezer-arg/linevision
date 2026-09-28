@@ -27,18 +27,18 @@ import {
 import { api } from '../services/api';
 
 export const DatabaseConfigView: React.FC = () => {
-  // Config state
+  // Config state - Predeterminado Microsoft SQL Server TB-L
   const [config, setConfig] = useState<DatabaseConnectionConfig>({
-    provider: 'Sqlite',
-    connectionString: 'Data Source=LineVision_DL02.db',
-    server: 'localhost',
+    provider: 'SqlServer',
+    connectionString: 'Server=172.17.132.153;Database=TB-L;User Id=sa;Password=1enelMundo!;TrustServerCertificate=True;Connect Timeout=15;',
+    server: '172.17.132.153',
     port: 1433,
-    databaseName: 'LineVision_DL02',
+    databaseName: 'TB-L',
     username: 'sa',
-    password: '',
+    password: '1enelMundo!',
     integratedSecurity: false,
     trustServerCertificate: true,
-    connectionTimeout: 30
+    connectionTimeout: 15
   });
 
   // UI state
@@ -61,14 +61,20 @@ export const DatabaseConfigView: React.FC = () => {
   const [seedMasterData, setSeedMasterData] = useState<boolean>(true);
   const [useCustomConnString, setUseCustomConnString] = useState<boolean>(false);
 
+  // Normaliza errores de tipeo como "Connect meout" -> "Connect Timeout"
+  const cleanConnString = (str: string) => {
+    if (!str) return '';
+    return str.replace(/Connect\s*meout/gi, 'Connect Timeout').trim();
+  };
+
   // Helper to recompute SQL Server connection string
   const computeSqlServerConnString = (cfg: DatabaseConnectionConfig) => {
-    const srv = cfg.port && cfg.port !== 1433 ? `${cfg.server || 'localhost'},${cfg.port}` : (cfg.server || 'localhost');
-    let cs = `Server=${srv};Database=${cfg.databaseName || 'LineVision_DL02'};`;
+    const srv = cfg.port && cfg.port !== 1433 ? `${cfg.server || '172.17.132.153'},${cfg.port}` : (cfg.server || '172.17.132.153');
+    let cs = `Server=${srv};Database=${cfg.databaseName || 'TB-L'};`;
     if (cfg.integratedSecurity) {
       cs += 'Integrated Security=True;';
     } else {
-      cs += `User Id=${cfg.username || 'sa'};Password=${cfg.password || ''};`;
+      cs += `User Id=${cfg.username || 'sa'};Password=${cfg.password || '1enelMundo!'};`;
     }
     if (cfg.trustServerCertificate) {
       cs += 'TrustServerCertificate=True;';
@@ -76,7 +82,7 @@ export const DatabaseConfigView: React.FC = () => {
     if (cfg.connectionTimeout) {
       cs += `Connect Timeout=${cfg.connectionTimeout};`;
     }
-    return cs;
+    return cleanConnString(cs);
   };
 
   // Load initial data
@@ -134,6 +140,11 @@ export const DatabaseConfigView: React.FC = () => {
     if (newProvider === 'Sqlite') {
       next.connectionString = 'Data Source=LineVision_DL02.db';
     } else {
+      next.server = next.server || '172.17.132.153';
+      next.databaseName = next.databaseName || 'TB-L';
+      next.username = next.username || 'sa';
+      next.password = next.password || '1enelMundo!';
+      next.connectionTimeout = next.connectionTimeout || 15;
       next.connectionString = computeSqlServerConnString(next);
     }
     setConfig(next);
@@ -153,7 +164,11 @@ export const DatabaseConfigView: React.FC = () => {
     setFeedback(null);
     setTestResult(null);
     try {
-      const res = await api.testDatabaseConnection(config);
+      const cfgToTest = {
+        ...config,
+        connectionString: cleanConnString(config.connectionString || '')
+      };
+      const res = await api.testDatabaseConnection(cfgToTest);
       setTestResult(res);
       if (res.success) {
         setFeedback({
@@ -178,9 +193,13 @@ export const DatabaseConfigView: React.FC = () => {
     setSaving(true);
     setFeedback(null);
     try {
-      const res = await api.updateDatabaseConfig(config);
+      const cfgToSend = {
+        ...config,
+        connectionString: cleanConnString(config.connectionString || '')
+      };
+      const res = await api.updateDatabaseConfig(cfgToSend);
       if (res && res.success) {
-        setFeedback({ type: 'success', text: 'Configuración guardada y conexión en caliente establecida.' });
+        setFeedback({ type: 'success', text: 'Configuración guardada y aplicada en caliente correctamente.' });
         await refreshTables();
       } else {
         setFeedback({ type: 'error', text: res?.message || 'Error al guardar configuración.' });

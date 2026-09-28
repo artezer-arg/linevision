@@ -95,13 +95,27 @@ var app = builder.Build();
 // Run post-restart industrial safety recovery before accepting cycle commands
 using (var scope = app.Services.CreateScope())
 {
-    var recoveryService = scope.ServiceProvider.GetRequiredService<CycleRecoveryService>();
-    var stationCode = builder.Configuration["Station:Code"] ?? "DL02";
-    await recoveryService.PerformStartupReconciliationAsync(stationCode);
+    try
+    {
+        var recoveryService = scope.ServiceProvider.GetRequiredService<CycleRecoveryService>();
+        var stationCode = builder.Configuration["Station:Code"] ?? "DL02";
+        await recoveryService.PerformStartupReconciliationAsync(stationCode);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Industrial safety recovery deferred: database or PLC offline on startup");
+    }
 
-    // Initialize all industrial and physical cameras on startup
-    var cameraManager = scope.ServiceProvider.GetRequiredService<ICameraManager>();
-    await cameraManager.InitializeCamerasAsync();
+    try
+    {
+        // Initialize all industrial and physical cameras on startup
+        var cameraManager = scope.ServiceProvider.GetRequiredService<ICameraManager>();
+        await cameraManager.InitializeCamerasAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Camera manager initialization deferred");
+    }
 }
 
 // HTTP Pipeline

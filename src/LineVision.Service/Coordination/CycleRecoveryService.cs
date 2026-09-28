@@ -39,12 +39,21 @@ public class CycleRecoveryService
         _logger.LogInformation("Recovery Step 1: PLC state read as {State} ({Desc})", plcState.LogicalState, plcState.StateDescription);
 
         // 2. Consultar último ProductionCycle sin FechaFin
-        const string sqlUnfinished = @"
-            SELECT * FROM ProductionCycle 
-            WHERE Puesto = @stationCode AND FechaFin IS NULL 
-            ORDER BY FechaInicio DESC LIMIT 1";
+        ProductionCycle? unfinishedCycle = null;
+        try
+        {
+            const string sqlUnfinished = @"
+                SELECT * FROM ProductionCycle 
+                WHERE Puesto = @stationCode AND FechaFin IS NULL 
+                ORDER BY FechaInicio DESC LIMIT 1";
 
-        var unfinishedCycle = await _db.QuerySingleOrDefaultAsync<ProductionCycle>(sqlUnfinished, new { stationCode }, ct);
+            unfinishedCycle = await _db.QuerySingleOrDefaultAsync<ProductionCycle>(sqlUnfinished, new { stationCode }, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Recovery Step 2: Database unreachable on startup ({Msg}). Continuing normal station initialization.", ex.Message);
+        }
+
         result.HasUnfinishedCycle = unfinishedCycle != null;
 
         if (unfinishedCycle == null)

@@ -27,10 +27,19 @@ public class CameraManager : ICameraManager
         await _lock.WaitAsync(ct);
         try
         {
-            const string sql = "SELECT * FROM Camera WHERE Active = 1";
-            var cameraConfigs = (await _db.QueryAsync<CameraConfig>(sql, null, ct)).ToList();
+            List<CameraConfig> cameraConfigs;
+            try
+            {
+                const string sql = "SELECT * FROM Camera WHERE Active = 1";
+                cameraConfigs = (await _db.QueryAsync<CameraConfig>(sql, null, ct)).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Database offline during camera config load: {Msg}. Using default camera definitions.", ex.Message);
+                cameraConfigs = new List<CameraConfig>();
+            }
 
-            // If table has no cameras, seed default configurations
+            // If table has no cameras or DB offline, seed default configurations
             if (!cameraConfigs.Any())
             {
                 cameraConfigs = new List<CameraConfig>
@@ -42,9 +51,13 @@ public class CameraManager : ICameraManager
 
                 foreach (var cfg in cameraConfigs)
                 {
-                    await _db.ExecuteAsync(@"
-                        INSERT OR REPLACE INTO Camera (CameraId, Name, StationCode, ProviderType, ConnectionUri, Exposure, Gain, Fps, IsColor, Active)
-                        VALUES (@CameraId, @Name, @StationCode, @ProviderType, @ConnectionUri, @Exposure, @Gain, @Fps, @IsColor, @Active)", cfg, ct);
+                    try
+                    {
+                        await _db.ExecuteAsync(@"
+                            INSERT OR REPLACE INTO Camera (CameraId, Name, StationCode, ProviderType, ConnectionUri, Exposure, Gain, Fps, IsColor, Active)
+                            VALUES (@CameraId, @Name, @StationCode, @ProviderType, @ConnectionUri, @Exposure, @Gain, @Fps, @IsColor, @Active)", cfg, ct);
+                    }
+                    catch { }
                 }
             }
 
