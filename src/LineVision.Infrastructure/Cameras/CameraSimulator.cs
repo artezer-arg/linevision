@@ -44,16 +44,24 @@ public class CameraSimulator : ICameraProvider
             throw new InvalidOperationException($"Camera {CameraId} is not connected");
         }
 
-        // If a custom image was injected, return it
-        if (_customImageBytes != null && _customImageBytes.Length > 0)
+        try
         {
-            using var mat = Cv2.ImDecode(_customImageBytes, ImreadModes.Color);
-            return Task.FromResult(CreateFrameFromMat(mat));
-        }
+            // If a custom image was injected, return it
+            if (_customImageBytes != null && _customImageBytes.Length > 0)
+            {
+                using var mat = Cv2.ImDecode(_customImageBytes, ImreadModes.Color);
+                return Task.FromResult(CreateFrameFromMat(mat));
+            }
 
-        // Generate synthetic industrial camera frame
-        using var frameMat = GenerateSyntheticFrame();
-        return Task.FromResult(CreateFrameFromMat(frameMat));
+            // Generate synthetic industrial camera frame
+            using var frameMat = GenerateSyntheticFrame();
+            return Task.FromResult(CreateFrameFromMat(frameMat));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "OpenCv generation failed for {CameraId}, using managed byte fallback", CameraId);
+            return Task.FromResult(CreateManagedFallbackFrame());
+        }
     }
 
     private Mat GenerateSyntheticFrame()
@@ -97,8 +105,12 @@ public class CameraSimulator : ICameraProvider
 
         // Inserto Mano (ROI_Mano at 50, 50, 120, 100)
         bool handOk = !_activePattern.Contains("NOK_HAND");
-        Cv2.Rectangle(mat, new Rect(60, 60, 100, 80), handOk ? new Scalar(0, 160, 0) : new Scalar(0, 0, 160), -1);
+        Cv2.Rectangle(mat, new Rect(60, 60, 100, 80), handOk ? new Scalar(0, 180, 0) : new Scalar(0, 0, 180), -1);
         Cv2.PutText(mat, handOk ? "HAND: RH" : "HAND: LH", new Point(65, 105), HersheyFonts.HersheySimplex, 0.45, new Scalar(255, 255, 255), 1);
+
+        // Inserto Mano / Marcador Verde matching DB ROI_Mano (209, 375, 86, 40)
+        Cv2.Rectangle(mat, new Rect(209, 375, 86, 40), handOk ? new Scalar(0, 180, 0) : new Scalar(0, 0, 180), -1);
+        Cv2.PutText(mat, "OK VERDE", new Point(212, 395), HersheyFonts.HersheySimplex, 0.35, new Scalar(255, 255, 255), 1);
 
         // Posición (ROI_Pos at 200, 50, 120, 100)
         bool posOk = !_activePattern.Contains("NOK_POS");
@@ -134,12 +146,11 @@ public class CameraSimulator : ICameraProvider
         else if (_activePattern.StartsWith("CUNA-", StringComparison.OrdinalIgnoreCase)) 
             qrText = _activePattern;
         
-        Cv2.Rectangle(mat, new Rect(220, 260, 200, 120), new Scalar(255, 255, 255), -1);
-        Cv2.Rectangle(mat, new Rect(225, 265, 40, 40), new Scalar(0, 0, 0), -1);
-        Cv2.Rectangle(mat, new Rect(375, 265, 40, 40), new Scalar(0, 0, 0), -1);
-        Cv2.Rectangle(mat, new Rect(225, 335, 40, 40), new Scalar(0, 0, 0), -1);
-        Cv2.PutText(mat, "QR SIMULATOR", new Point(275, 290), HersheyFonts.HersheySimplex, 0.35, new Scalar(0, 0, 0), 1);
-        Cv2.PutText(mat, qrText, new Point(230, 370), HersheyFonts.HersheySimplex, 0.35, new Scalar(0, 0, 180), 1);
+        Cv2.Rectangle(mat, new Rect(220, 260, 200, 100), new Scalar(255, 255, 255), -1);
+        Cv2.Rectangle(mat, new Rect(225, 265, 30, 30), new Scalar(0, 0, 0), -1);
+        Cv2.Rectangle(mat, new Rect(375, 265, 30, 30), new Scalar(0, 0, 0), -1);
+        Cv2.PutText(mat, "QR SIMULATOR", new Point(270, 285), HersheyFonts.HersheySimplex, 0.35, new Scalar(0, 0, 0), 1);
+        Cv2.PutText(mat, qrText, new Point(230, 345), HersheyFonts.HersheySimplex, 0.35, new Scalar(0, 0, 180), 1);
     }
 
     private void DrawPanelTopScene(Mat mat)
@@ -148,20 +159,20 @@ public class CameraSimulator : ICameraProvider
         Cv2.Rectangle(mat, new Rect(50, 40, 540, 400), new Scalar(60, 60, 65), -1);
         Cv2.Rectangle(mat, new Rect(50, 40, 540, 400), new Scalar(120, 120, 130), 2);
 
-        // IP_PANEL_01: Upper Left Clip (ROI at 80, 70, 160, 140)
+        // IP_PANEL_01: Upper Left Clip (DB ROI at 160, 78, 174, 145)
         bool clip1Ok = !_activePattern.Contains("NOK_PANEL_01") && !_activePattern.Contains("NOK_CLIP");
         if (clip1Ok)
         {
-            // Clip present (white/metallic fastener)
-            Cv2.Rectangle(mat, new Rect(110, 100, 100, 80), new Scalar(180, 190, 200), -1);
-            Cv2.Circle(mat, new Point(160, 140), 15, new Scalar(40, 40, 45), -1);
-            Cv2.PutText(mat, "CLIP TOP-L", new Point(115, 120), HersheyFonts.HersheySimplex, 0.35, new Scalar(10, 10, 10), 1);
+            // Clip present (red clip - expected CLIP_ROJO)
+            Cv2.Rectangle(mat, new Rect(160, 78, 174, 145), new Scalar(0, 0, 220), -1);
+            Cv2.Circle(mat, new Point(247, 150), 25, new Scalar(0, 0, 255), -1);
+            Cv2.PutText(mat, "CLIP ROJO", new Point(170, 130), HersheyFonts.HersheySimplex, 0.45, new Scalar(255, 255, 255), 1);
         }
         else
         {
             // Clip missing / empty dark slot
-            Cv2.Rectangle(mat, new Rect(110, 100, 100, 80), new Scalar(30, 30, 35), -1);
-            Cv2.PutText(mat, "SLOT EMPTY", new Point(115, 145), HersheyFonts.HersheySimplex, 0.35, new Scalar(0, 0, 200), 1);
+            Cv2.Rectangle(mat, new Rect(160, 78, 174, 145), new Scalar(30, 30, 35), -1);
+            Cv2.PutText(mat, "SLOT EMPTY", new Point(170, 145), HersheyFonts.HersheySimplex, 0.35, new Scalar(0, 0, 200), 1);
         }
 
         // IP_PANEL_02: Upper Right Insert (ROI at 420, 70, 160, 140)
@@ -224,6 +235,85 @@ public class CameraSimulator : ICameraProvider
     {
         _activePattern = pattern;
         _logger.LogInformation("Camera {CameraId} simulation pattern set to: {Pattern}", CameraId, pattern);
+    }
+
+    private CameraFrame CreateManagedFallbackFrame()
+    {
+        const int width = 640;
+        const int height = 480;
+        const int headerSize = 54;
+        const int imageSize = width * height * 3;
+        var fullBmp = new byte[headerSize + imageSize];
+
+        // BITMAPFILEHEADER
+        fullBmp[0] = 0x42; // 'B'
+        fullBmp[1] = 0x4D; // 'M'
+        BitConverter.GetBytes(headerSize + imageSize).CopyTo(fullBmp, 2);
+        fullBmp[10] = headerSize;
+
+        // BITMAPINFOHEADER
+        fullBmp[14] = 40;
+        BitConverter.GetBytes(width).CopyTo(fullBmp, 18);
+        BitConverter.GetBytes(-height).CopyTo(fullBmp, 22); // Top-down
+        fullBmp[26] = 1; // Planes
+        fullBmp[28] = 24; // 24 bpp BGR
+        BitConverter.GetBytes(imageSize).CopyTo(fullBmp, 34);
+
+        // Fill background with dark industrial gray (B=35, G=35, R=38)
+        int pixelOffset = headerSize;
+        for (int i = 0; i < width * height; i++)
+        {
+            fullBmp[pixelOffset] = 35;     // B
+            fullBmp[pixelOffset + 1] = 35; // G
+            fullBmp[pixelOffset + 2] = 38; // R
+            pixelOffset += 3;
+        }
+
+        // Draw synthetic features for simulation based on camera
+        if (CameraId == "CAM_CRADLE")
+        {
+            // Draw green marker at ROI_Mano (209, 375, 86, 40)
+            FillRect(fullBmp, width, height, headerSize, 209, 375, 86, 40, 0, 180, 0);
+            FillRect(fullBmp, width, height, headerSize, 60, 60, 100, 80, 0, 180, 0);
+        }
+        else if (CameraId == "CAM_PANEL_01")
+        {
+            // Draw red clip at ROI_Panel_TopLeft (160, 78, 174, 145)
+            FillRect(fullBmp, width, height, headerSize, 160, 78, 174, 145, 0, 0, 220);
+        }
+        else if (CameraId == "CAM_PANEL_02")
+        {
+            // Draw clip at ROI_Panel_BottomClip (250, 320, 180, 150)
+            FillRect(fullBmp, width, height, headerSize, 250, 320, 180, 150, 200, 200, 200);
+        }
+
+        return new CameraFrame
+        {
+            CameraId = CameraId,
+            Width = width,
+            Height = height,
+            Channels = 3,
+            Data = fullBmp,
+            Base64Jpeg = Convert.ToBase64String(fullBmp),
+            Timestamp = DateTime.UtcNow
+        };
+    }
+
+    private static void FillRect(byte[] bmp, int w, int h, int headerOffset, int rx, int ry, int rw, int rh, byte b, byte g, byte r)
+    {
+        int xEnd = Math.Min(rx + rw, w);
+        int yEnd = Math.Min(ry + rh, h);
+
+        for (int y = Math.Max(0, ry); y < yEnd; y++)
+        {
+            for (int x = Math.Max(0, rx); x < xEnd; x++)
+            {
+                int idx = headerOffset + (y * w + x) * 3;
+                bmp[idx] = b;
+                bmp[idx + 1] = g;
+                bmp[idx + 2] = r;
+            }
+        }
     }
 
     public ValueTask DisposeAsync()

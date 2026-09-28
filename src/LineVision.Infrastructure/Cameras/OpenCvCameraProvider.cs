@@ -213,21 +213,51 @@ public class OpenCvCameraProvider : ICameraProvider
 
     private CameraFrame GetFallbackFrame()
     {
-        using var fallbackMat = new Mat(480, 640, MatType.CV_8UC3, new Scalar(25, 25, 30));
-        Cv2.PutText(fallbackMat, $"{CameraId}: CONECTANDO A CAMARA USB...", new Point(80, 240),
-            HersheyFonts.HersheySimplex, 0.6, new Scalar(0, 200, 255), 2);
-        Cv2.ImEncode(".jpg", fallbackMat, out byte[] fallbackBytes, new ImageEncodingParam(ImwriteFlags.JpegQuality, 80));
-
-        return new CameraFrame
+        try
         {
-            CameraId = CameraId,
-            Width = 640,
-            Height = 480,
-            Channels = 3,
-            Data = fallbackMat.ToBytes(),
-            Base64Jpeg = Convert.ToBase64String(fallbackBytes),
-            Timestamp = DateTime.UtcNow
-        };
+            using var fallbackMat = new Mat(480, 640, MatType.CV_8UC3, new Scalar(25, 25, 30));
+            Cv2.PutText(fallbackMat, $"{CameraId}: CONECTANDO A CAMARA USB...", new Point(80, 240),
+                HersheyFonts.HersheySimplex, 0.6, new Scalar(0, 200, 255), 2);
+            Cv2.ImEncode(".jpg", fallbackMat, out byte[] fallbackBytes, new ImageEncodingParam(ImwriteFlags.JpegQuality, 80));
+
+            return new CameraFrame
+            {
+                CameraId = CameraId,
+                Width = 640,
+                Height = 480,
+                Channels = 3,
+                Data = fallbackMat.ToBytes(),
+                Base64Jpeg = Convert.ToBase64String(fallbackBytes),
+                Timestamp = DateTime.UtcNow
+            };
+        }
+        catch
+        {
+            // Pure managed BMP fallback
+            const int width = 640;
+            const int height = 480;
+            const int headerSize = 54;
+            const int imageSize = width * height * 3;
+            var fullBmp = new byte[headerSize + imageSize];
+            fullBmp[0] = 0x42; fullBmp[1] = 0x4D;
+            BitConverter.GetBytes(headerSize + imageSize).CopyTo(fullBmp, 2);
+            fullBmp[10] = headerSize;
+            fullBmp[14] = 40;
+            BitConverter.GetBytes(width).CopyTo(fullBmp, 18);
+            BitConverter.GetBytes(-height).CopyTo(fullBmp, 22);
+            fullBmp[26] = 1; fullBmp[28] = 24;
+            BitConverter.GetBytes(imageSize).CopyTo(fullBmp, 34);
+            return new CameraFrame
+            {
+                CameraId = CameraId,
+                Width = width,
+                Height = height,
+                Channels = 3,
+                Data = fullBmp,
+                Base64Jpeg = Convert.ToBase64String(fullBmp),
+                Timestamp = DateTime.UtcNow
+            };
+        }
     }
 
     public void SetSimulationImage(byte[] imageBytes)

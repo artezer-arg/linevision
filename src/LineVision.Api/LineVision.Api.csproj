@@ -18,4 +18,11 @@
     <ProjectReference Include="..\LineVision.Service\LineVision.Service.csproj" />
   </ItemGroup>
 
+  <Target Name="CopyNativeDllsToRoot" AfterTargets="Build;Publish">
+    <Copy SourceFiles="$(OutputPath)runtimes\win-x64\native\OpenCvSharpExtern.dll" DestinationFolder="$(OutputPath)" Condition="Exists('$(OutputPath)runtimes\win-x64\native\OpenCvSharpExtern.dll')" ContinueOnError="true" />
+    <Copy SourceFiles="$(OutputPath)runtimes\win-x64\native\e_sqlite3.dll" DestinationFolder="$(OutputPath)" Condition="Exists('$(OutputPath)runtimes\win-x64\native\e_sqlite3.dll')" ContinueOnError="true" />
+    <Copy SourceFiles="$(PublishDir)runtimes\win-x64\native\OpenCvSharpExtern.dll" DestinationFolder="$(PublishDir)" Condition="'$(PublishDir)' != '' and Exists('$(PublishDir)runtimes\win-x64\native\OpenCvSharpExtern.dll')" ContinueOnError="true" />
+    <Copy SourceFiles="$(PublishDir)runtimes\win-x64\native\e_sqlite3.dll" DestinationFolder="$(PublishDir)" Condition="'$(PublishDir)' != '' and Exists('$(PublishDir)runtimes\win-x64\native\e_sqlite3.dll')" ContinueOnError="true" />
+  </Target>
+
 </Project>
