@@ -625,7 +625,7 @@ public class DatabaseService : IDatabaseService
 
                 CREATE TABLE IF NOT EXISTS Produccion_Secuencia (
                     ID_ProduccionSecuencia INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ID_Secuencia INTEGER NOT NULL,
+                    ID_Secuencia INTEGER NOT NULL DEFAULT 0,
                     ID_OrdenProduccion INTEGER NOT NULL,
                     ID_OrdenCliente TEXT NOT NULL,
                     Puesto TEXT NOT NULL,

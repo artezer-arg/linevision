@@ -79,17 +79,18 @@ public class ProductionSimulator
             order.Posicion,
             order.Orden,
             order.Estado,
-            FechaCreacion = order.FechaCreacion.ToString("o")
+            FechaCreacion = order.FechaCreacion
         }, ct);
 
         // Update station pointer to this new order
         const string sqlPointer = @"
             UPDATE Puesto SET 
                 Puntero_ID_OrdenProduccion = @orderId,
+                Fecha_Puntero = @now,
                 UltimaActualizacion = @now 
             WHERE Puesto = @stationCode";
 
-        await _db.ExecuteAsync(sqlPointer, new { orderId, now = DateTime.UtcNow.ToString("o"), stationCode }, ct);
+        await _db.ExecuteAsync(sqlPointer, new { orderId, now = DateTime.UtcNow, stationCode }, ct);
 
         _logger.LogInformation("SIMULATOR: Enqueued order ID {OrderId}, Sequence {Seq}, Variant {Model}/{Hand}/{Pos} for station {Station}",
             orderId, sequenceStr, model, hand, pos, stationCode);
@@ -99,8 +100,8 @@ public class ProductionSimulator
 
     public async Task SetStationPointerAsync(string stationCode, int orderId, CancellationToken ct = default)
     {
-        const string sql = "UPDATE Puesto SET Puntero_ID_OrdenProduccion = @orderId, UltimaActualizacion = @now WHERE Puesto = @stationCode";
-        await _db.ExecuteAsync(sql, new { orderId, now = DateTime.UtcNow.ToString("o"), stationCode }, ct);
+        const string sql = "UPDATE Puesto SET Puntero_ID_OrdenProduccion = @orderId, Fecha_Puntero = @now, UltimaActualizacion = @now WHERE Puesto = @stationCode";
+        await _db.ExecuteAsync(sql, new { orderId, now = DateTime.UtcNow, stationCode }, ct);
         _logger.LogInformation("SIMULATOR: Pointer for station {Station} explicitly set to {OrderId}", stationCode, orderId);
     }
 }

@@ -218,6 +218,8 @@ public class StateMachineController : IStateMachineController
 
             // Finalización y reinicio de ciclo
             (StationState.SAVING_STATION_RESULT, StationTrigger.ResultSaved) => StationState.CYCLE_COMPLETE,
+            (StationState.SAVING_STATION_RESULT, StationTrigger.CycleReset) => StationState.WAITING_ORDER,
+            (StationState.SAVING_STATION_RESULT, StationTrigger.OrderDetected) => StationState.ORDER_LOADED,
             (StationState.CYCLE_COMPLETE, StationTrigger.CycleReset) => StationState.WAITING_ORDER,
             (StationState.CYCLE_COMPLETE, StationTrigger.OrderDetected) => StationState.ORDER_LOADED,
 

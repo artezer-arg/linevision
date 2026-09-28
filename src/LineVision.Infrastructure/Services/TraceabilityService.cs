@@ -23,8 +23,8 @@ public class TraceabilityService : ITraceabilityService
             ?? "SELECT COUNT(1) FROM Produccion_Secuencia WHERE ID_Secuencia = @sequenceId AND Puesto = @stationCode";
 
         _sqlInsertSequenceResult = config["Queries:InsertSequenceResult"]
-            ?? @"INSERT INTO Produccion_Secuencia (ID_Secuencia, ID_OrdenProduccion, ID_OrdenCliente, Puesto, Fecha, Orden, Resultado)
-                 VALUES (@ID_Secuencia, @ID_OrdenProduccion, @ID_OrdenCliente, @Puesto, @Fecha, @Orden, @Resultado)";
+            ?? @"INSERT INTO Produccion_Secuencia (ID_OrdenProduccion, ID_OrdenCliente, Puesto, Fecha, Orden, Resultado)
+                 VALUES (@ID_OrdenProduccion, @ID_OrdenCliente, @Puesto, @Fecha, @Orden, @Resultado)";
     }
 
     public async Task<Guid> StartCycleAsync(ProductionOrder order, string stationCode, string user, CancellationToken ct = default)
@@ -186,12 +186,13 @@ public class TraceabilityService : ITraceabilityService
             else
             {
                 // 2. Inserción en la tabla productiva oficial
-                string now = DateTime.UtcNow.ToString("o");
+                DateTime now = DateTime.UtcNow;
+                int orderClienteInt = int.TryParse(cycle.ID_OrdenCliente, out int cId) ? cId : 0;
                 await _db.ExecuteAsync(_sqlInsertSequenceResult, new
                 {
                     cycle.ID_Secuencia,
                     cycle.ID_OrdenProduccion,
-                    cycle.ID_OrdenCliente,
+                    ID_OrdenCliente = orderClienteInt,
                     cycle.Puesto,
                     Fecha = now,
                     Orden = 1,

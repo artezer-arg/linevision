@@ -30,7 +30,7 @@ public class ProductionOrderService : IProductionOrderService
             ?? "SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion FROM OrdenProduccion WHERE ID_OrdenProduccion = @orderId";
 
         _sqlAdvancePointer = config["Queries:AdvanceStationPointer"]
-            ?? "UPDATE Puesto SET Puntero_ID_OrdenProduccion = @nextOrderId, UltimaActualizacion = @now WHERE Puesto = @stationCode";
+            ?? "UPDATE Puesto SET Puntero_ID_OrdenProduccion = @nextOrderId, Fecha_Puntero = @now, UltimaActualizacion = @now WHERE Puesto = @stationCode";
 
         _sqlGetPending = config["Queries:GetPendingOrders"]
             ?? "SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion FROM OrdenProduccion ORDER BY Orden ASC LIMIT @limit";
@@ -47,7 +47,7 @@ public class ProductionOrderService : IProductionOrderService
             var order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(_sqlGetOrder, new { orderId = currentPointer }, ct);
             if (order == null)
             {
-                // Buscar siguiente orden existente >= pointer
+                // 1. Buscar siguiente orden existente >= pointer
                 const string sqlFindNext = @"
                     SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion 
                     FROM OrdenProduccion 
@@ -55,6 +55,43 @@ public class ProductionOrderService : IProductionOrderService
                     ORDER BY ID_OrdenProduccion ASC 
                     LIMIT 1";
                 order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(sqlFindNext, new { orderId = currentPointer }, ct);
+
+                // 2. Si no se encuentra en OrdenProduccion, buscar en la tabla nativa de planta Orden_Produccion
+                if (order == null)
+                {
+                    try
+                    {
+                        const string sqlPlant = @"
+                            SELECT 
+                                ID_OrdenProduccion, 
+                                CAST(ID_OrdenCliente AS VARCHAR(50)) as ID_OrdenCliente, 
+                                Secuencia as ID_Secuencia, 
+                                RIGHT('0000' + CAST(Secuencia AS VARCHAR(10)), 4) as Secuencia, 
+                                SD as Modelo, 
+                                Mano, 
+                                CASE WHEN Posicion = 'FR' THEN 'FRONT' WHEN Posicion = 'RR' THEN 'REAR' ELSE Posicion END as Posicion, 
+                                Orden, 
+                                'PENDIENTE' as Estado, 
+                                ISNULL(Fecha_Secuencia, GETDATE()) as FechaCreacion
+                            FROM Orden_Produccion
+                            WHERE Puesto = @stationCode AND ID_OrdenProduccion >= @orderId
+                            ORDER BY ID_OrdenProduccion ASC
+                            LIMIT 1";
+                        order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(sqlPlant, new { stationCode, orderId = currentPointer }, ct);
+                        if (order != null)
+                        {
+                            const string sqlSync = @"
+                                IF NOT EXISTS (SELECT 1 FROM OrdenProduccion WHERE ID_OrdenProduccion = @ID_OrdenProduccion)
+                                INSERT INTO OrdenProduccion (ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion)
+                                VALUES (@ID_OrdenProduccion, @ID_OrdenCliente, @ID_Secuencia, @Secuencia, @Modelo, @Mano, @Posicion, @Orden, @Estado, @FechaCreacion)";
+                            await _db.ExecuteAsync(sqlSync, order, ct);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug("Query Orden_Produccion plant table skipped or not found: {Msg}", ex.Message);
+                    }
+                }
 
                 if (order != null)
                 {
@@ -83,7 +120,7 @@ public class ProductionOrderService : IProductionOrderService
     {
         try
         {
-            string now = DateTime.UtcNow.ToString("o");
+            DateTime now = DateTime.UtcNow;
             int rows = await _db.ExecuteAsync(_sqlAdvancePointer, new { nextOrderId, now, stationCode }, ct);
             _logger.LogInformation("Station {Station} pointer advanced to next order ID {NextOrderId} (rows affected: {Rows})", stationCode, nextOrderId, rows);
             return rows > 0;
