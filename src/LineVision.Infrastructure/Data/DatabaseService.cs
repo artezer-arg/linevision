@@ -527,6 +527,10 @@ public class DatabaseService : IDatabaseService
                     TagEchoRecipeB TEXT NOT NULL
                 );
 
+                UPDATE PLCConfiguration 
+                SET Protocol = 'SIEMENS_S7', Port = 102 
+                WHERE Protocol != 'SIEMENS_S7' OR Port != 102;
+
                 CREATE TABLE IF NOT EXISTS PLCStateMapping (
                     Mapping_ID INTEGER PRIMARY KEY AUTOINCREMENT,
                     EstadoLogico TEXT NOT NULL,
@@ -830,7 +834,7 @@ public class DatabaseService : IDatabaseService
                 (1004, 'CLI-2026-9904', 385, '0385', 'P1B', 'LH', 'REAR', 4, 'PENDIENTE', @now);
 
                 INSERT INTO PLCConfiguration (PLC_ID, StationCode, Protocol, IPAddress, Port, PollingIntervalMs, TimeoutMs, MaxRetries, Active, TagRecipeA, TagRecipeB, TagRecipeReady, TagStationState, TagRecipeReceived, TagEchoRecipeA, TagEchoRecipeB)
-                VALUES ('PLC_DL02', 'DL02', 'SIMULATOR', '192.168.1.50', 44818, 100, 2000, 3, 1, 'PC_To_PLC.Recipe_A', 'PC_To_PLC.Recipe_B', 'PC_To_PLC.RecipeReady', 'PLC_To_PC.State', 'PLC_To_PC.RecipeReceived', 'PLC_To_PC.EchoRecipe_A', 'PLC_To_PC.EchoRecipe_B');
+                VALUES ('PLC_DL02', 'DL02', 'SIEMENS_S7', '192.168.1.50', 102, 100, 2000, 3, 1, 'DB48.DBW0', 'DB48.DBW2', 'DB48.DBX4.0', 'DB48.DBW0', 'DB48.DBX4.0', 'DB48.DBW2', 'DB48.DBW2');
 
                 INSERT INTO PLCStateMapping (EstadoLogico, ValorPLC, Descripcion)
                 VALUES 

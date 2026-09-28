@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { PLCConfiguration, PLCStatusInfo, TcpPingResult, HandshakeTestResult, StationWorkflowConfig } from '../types';
 import { api } from '../services/api';
-import { TelnetGatewaySection } from './TelnetGatewaySection';
 import {
   Cpu,
   Activity,
@@ -30,7 +29,7 @@ interface Props {
 }
 
 export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialWorkflowConfig, onWorkflowConfigUpdated }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'WORKFLOW' | 'TELNET' | 'DIRECT'>('WORKFLOW');
+  const [activeSubTab, setActiveSubTab] = useState<'WORKFLOW' | 'SIEMENS'>('WORKFLOW');
   const [workflowConfig, setWorkflowConfig] = useState<StationWorkflowConfig>(initialWorkflowConfig || {
     workflowMode: 'DIRECT_5_STEP',
     plcIpAddress: '192.168.1.50',
@@ -49,20 +48,20 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
   const [config, setConfig] = useState<PLCConfiguration>({
     plC_ID: 'PLC_DL02',
     stationCode: 'DL02',
-    protocol: 'SIMULATOR',
+    protocol: 'SIEMENS_S7',
     ipAddress: '192.168.1.50',
-    port: 44818,
+    port: 102,
     pollingIntervalMs: 100,
     timeoutMs: 2000,
     maxRetries: 3,
     active: true,
-    tagRecipeA: 'PC_To_PLC.Recipe_A',
-    tagRecipeB: 'PC_To_PLC.Recipe_B',
-    tagRecipeReady: 'PC_To_PLC.RecipeReady',
-    tagStationState: 'PLC_To_PC.State',
-    tagRecipeReceived: 'PLC_To_PC.RecipeReceived',
-    tagEchoRecipeA: 'PLC_To_PC.EchoRecipe_A',
-    tagEchoRecipeB: 'PLC_To_PC.EchoRecipe_B'
+    tagRecipeA: 'DB48.DBW0',
+    tagRecipeB: 'DB48.DBW2',
+    tagRecipeReady: 'DB48.DBX4.0',
+    tagStationState: 'DB48.DBW0',
+    tagRecipeReceived: 'DB48.DBX4.0',
+    tagEchoRecipeA: 'DB48.DBW2',
+    tagEchoRecipeB: 'DB48.DBW2'
   });
 
   const [status, setStatus] = useState<PLCStatusInfo | null>(null);
@@ -81,24 +80,8 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
   const [s7Result, setS7Result] = useState<any>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
-  // Protocols catalog
+  // Protocols catalog - Solo Siemens S7
   const PROTOCOLS = [
-    {
-      id: 'TELNET_GATEWAY',
-      name: 'Gateway Telnet (App Proveedor)',
-      desc: 'App puente local en 127.0.0.1:12345 (Bridge / Socket TCP)',
-      defaultPort: 12345,
-      badge: 'APP LOCAL',
-      color: 'emerald'
-    },
-    {
-      id: 'SIMULATOR',
-      name: 'Simulador Interno',
-      desc: 'Memoria interna de alta velocidad y simulación de robot',
-      defaultPort: 44818,
-      badge: 'VIRTUAL',
-      color: 'purple'
-    },
     {
       id: 'SIEMENS_S7',
       name: 'Siemens S7 (ISO-on-TCP)',
@@ -106,30 +89,6 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
       defaultPort: 102,
       badge: 'DIRECT S7',
       color: 'cyan'
-    },
-    {
-      id: 'MODBUS_TCP',
-      name: 'Modbus TCP/IP',
-      desc: 'Holding Registers estándar industrial (Fnc 03, 06, 16)',
-      defaultPort: 502,
-      badge: 'MODBUS',
-      color: 'amber'
-    },
-    {
-      id: 'ETHERNET_IP',
-      name: 'Allen-Bradley (EtherNet/IP)',
-      desc: 'ControlLogix / CompactLogix mediante CIP Tags',
-      defaultPort: 44818,
-      badge: 'ROCKWELL CIP',
-      color: 'blue'
-    },
-    {
-      id: 'OPC_UA',
-      name: 'OPC UA Client',
-      desc: 'Arquitectura abierta binaria segura tcp://',
-      defaultPort: 4840,
-      badge: 'OPC UA',
-      color: 'emerald'
     }
   ];
 
@@ -156,20 +115,20 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
         setConfig({
           plC_ID: cfg.plC_ID || cfg.PLC_ID || 'PLC_DL02',
           stationCode: cfg.stationCode || cfg.StationCode || 'DL02',
-          protocol: cfg.protocol || cfg.Protocol || 'SIMULATOR',
+          protocol: 'SIEMENS_S7',
           ipAddress: cfg.ipAddress || cfg.IPAddress || '192.168.1.50',
-          port: Number(cfg.port || cfg.Port) || 44818,
+          port: Number(cfg.port || cfg.Port) || 102,
           pollingIntervalMs: Number(cfg.pollingIntervalMs || cfg.PollingIntervalMs) || 100,
           timeoutMs: Number(cfg.timeoutMs || cfg.TimeoutMs) || 2000,
           maxRetries: Number(cfg.maxRetries || cfg.MaxRetries) || 3,
           active: cfg.active !== undefined ? cfg.active : true,
-          tagRecipeA: cfg.tagRecipeA || cfg.TagRecipeA || 'PC_To_PLC.Recipe_A',
-          tagRecipeB: cfg.tagRecipeB || cfg.TagRecipeB || 'PC_To_PLC.Recipe_B',
-          tagRecipeReady: cfg.tagRecipeReady || cfg.TagRecipeReady || 'PC_To_PLC.RecipeReady',
-          tagStationState: cfg.tagStationState || cfg.TagStationState || 'PLC_To_PC.State',
-          tagRecipeReceived: cfg.tagRecipeReceived || cfg.TagRecipeReceived || 'PLC_To_PC.RecipeReceived',
-          tagEchoRecipeA: cfg.tagEchoRecipeA || cfg.TagEchoRecipeA || 'PLC_To_PC.EchoRecipe_A',
-          tagEchoRecipeB: cfg.tagEchoRecipeB || cfg.TagEchoRecipeB || 'PLC_To_PC.EchoRecipe_B'
+          tagRecipeA: cfg.tagRecipeA || cfg.TagRecipeA || 'DB48.DBW0',
+          tagRecipeB: cfg.tagRecipeB || cfg.TagRecipeB || 'DB48.DBW2',
+          tagRecipeReady: cfg.tagRecipeReady || cfg.TagRecipeReady || 'DB48.DBX4.0',
+          tagStationState: cfg.tagStationState || cfg.TagStationState || 'DB48.DBW0',
+          tagRecipeReceived: cfg.tagRecipeReceived || cfg.TagRecipeReceived || 'DB48.DBX4.0',
+          tagEchoRecipeA: cfg.tagEchoRecipeA || cfg.TagEchoRecipeA || 'DB48.DBW2',
+          tagEchoRecipeB: cfg.tagEchoRecipeB || cfg.TagEchoRecipeB || 'DB48.DBW2'
         });
       }
 
@@ -221,70 +180,28 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
     }
   };
 
-  const handleProtocolSelect = (protoId: any) => {
-    const protoDef = PROTOCOLS.find(p => p.id === protoId);
-    if (protoId === 'TELNET_GATEWAY') {
-      setConfig(prev => ({
-        ...prev,
-        protocol: 'TELNET_GATEWAY',
-        ipAddress: '127.0.0.1',
-        port: 12345
-      }));
-      setActiveSubTab('TELNET');
-      showToast('info', 'Preset aplicado: Gateway Telnet en 127.0.0.1:12345');
-      return;
-    }
+  const handleProtocolSelect = () => {
     setConfig(prev => ({
       ...prev,
-      protocol: protoId,
-      port: protoDef ? protoDef.defaultPort : prev.port
+      protocol: 'SIEMENS_S7',
+      port: 102
     }));
   };
 
-  const handleApplyPreset = (presetType: 'CIP' | 'MODBUS' | 'SIEMENS') => {
-    if (presetType === 'CIP') {
-      setConfig(prev => ({
-        ...prev,
-        protocol: 'ETHERNET_IP',
-        port: 44818,
-        tagRecipeA: 'PC_To_PLC.Recipe_A',
-        tagRecipeB: 'PC_To_PLC.Recipe_B',
-        tagRecipeReady: 'PC_To_PLC.RecipeReady',
-        tagStationState: 'PLC_To_PC.State',
-        tagRecipeReceived: 'PLC_To_PC.RecipeReceived',
-        tagEchoRecipeA: 'PLC_To_PC.EchoRecipe_A',
-        tagEchoRecipeB: 'PLC_To_PC.EchoRecipe_B'
-      }));
-      showToast('info', 'Preset aplicado: Nomenclatura Rockwell / CIP Tags');
-    } else if (presetType === 'MODBUS') {
-      setConfig(prev => ({
-        ...prev,
-        protocol: 'MODBUS_TCP',
-        port: 502,
-        tagRecipeA: 'HR_40001 (Recipe_A)',
-        tagRecipeB: 'HR_40002 (Recipe_B)',
-        tagRecipeReady: 'Coil_00001 (RecipeReady)',
-        tagStationState: 'HR_40010 (State)',
-        tagRecipeReceived: 'Coil_00010 (RecipeReceived)',
-        tagEchoRecipeA: 'HR_40011 (Echo_A)',
-        tagEchoRecipeB: 'HR_40012 (Echo_B)'
-      }));
-      showToast('info', 'Preset aplicado: Registros Modbus Holding Registers');
-    } else if (presetType === 'SIEMENS') {
-      setConfig(prev => ({
-        ...prev,
-        protocol: 'SIEMENS_S7',
-        port: 102,
-        tagRecipeA: 'DB48.DBW0 (nModeloPLC)',
-        tagRecipeB: 'DB48.DBW2 (nModeloCamara)',
-        tagRecipeReady: 'DB48.DBX4.0 (bResultadoOK)',
-        tagStationState: 'DB48.DBW0',
-        tagRecipeReceived: 'DB48.DBX4.0',
-        tagEchoRecipeA: 'DB48.DBW2',
-        tagEchoRecipeB: 'DB48.DBW2'
-      }));
-      showToast('info', 'Preset aplicado: Siemens S7-1500 DB48 (nModeloPLC, nModeloCamara, bResultadoOK)');
-    }
+  const handleApplyPreset = () => {
+    setConfig(prev => ({
+      ...prev,
+      protocol: 'SIEMENS_S7',
+      port: 102,
+      tagRecipeA: 'DB48.DBW0 (nModeloPLC)',
+      tagRecipeB: 'DB48.DBW2 (nModeloCamara)',
+      tagRecipeReady: 'DB48.DBX4.0 (bResultadoOK)',
+      tagStationState: 'DB48.DBW0',
+      tagRecipeReceived: 'DB48.DBX4.0',
+      tagEchoRecipeA: 'DB48.DBW2',
+      tagEchoRecipeB: 'DB48.DBW2'
+    }));
+    showToast('info', 'Valores estándar aplicados: Siemens S7-1500 DB48 (nModeloPLC, nModeloCamara, bResultadoOK)');
   };
 
   const handleSaveConfig = async () => {
@@ -473,39 +390,26 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
           }`}
         >
           <Sliders className="w-4 h-4 text-cyan-300" />
-          <span>Flujo de Secuencia (5 Pasos S7 vs Tradicional)</span>
+          <span>Flujo de Secuencia (5 Pasos S7)</span>
           <span className="px-1.5 py-0.5 bg-black/40 rounded text-[9px] text-cyan-300 border border-cyan-500/40 font-mono">
-            {workflowConfig.workflowMode === 'DIRECT_5_STEP' ? '5 PASOS S7' : 'LEGACY ROBOT'}
+            {workflowConfig.workflowMode === 'DIRECT_5_STEP' ? '5 PASOS S7' : 'TRADICIONAL'}
           </span>
         </button>
 
         <button
           type="button"
-          onClick={() => setActiveSubTab('TELNET')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center space-x-2 transition ${
-            activeSubTab === 'TELNET'
-              ? 'bg-gradient-to-r from-emerald-600 to-cyan-600 text-white shadow-lg shadow-emerald-950/40 ring-2 ring-emerald-400/40'
-              : 'bg-slate-900/60 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-          }`}
-        >
-          <Terminal className="w-4 h-4 text-cyan-300" />
-          <span>Gateway Telnet / TCP Socket (127.0.0.1:12345)</span>
-          <span className="px-1.5 py-0.5 bg-black/40 rounded text-[9px] text-emerald-300 border border-emerald-500/40 font-mono">
-            APP PROVEEDOR
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveSubTab('DIRECT')}
+          onClick={() => setActiveSubTab('SIEMENS')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-2 transition ${
-            activeSubTab === 'DIRECT'
-              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-950/40 ring-2 ring-indigo-400/40 font-black'
+            activeSubTab === 'SIEMENS'
+              ? 'bg-cyan-600 text-black font-black shadow-lg shadow-cyan-950/40 ring-2 ring-cyan-400/40'
               : 'bg-slate-900/60 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
           }`}
         >
-          <Cpu className="w-4 h-4 text-indigo-300" />
-          <span>Drivers Directos PLC (Siemens / Rockwell / Modbus / Simulador)</span>
+          <Cpu className="w-4 h-4 text-cyan-400" />
+          <span>Conexión Siemens S7 (ISO-on-TCP)</span>
+          <span className="px-1.5 py-0.5 bg-black/40 rounded text-[9px] text-cyan-300 border border-cyan-500/40 font-mono">
+            RFC 1006 | PUERTO 102
+          </span>
         </button>
       </div>
 
@@ -788,64 +692,46 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
             )}
           </div>
         </div>
-      ) : activeSubTab === 'TELNET' ? (
-        <TelnetGatewaySection
-          plcConfig={config}
-          onActivateAsMainDriver={async () => {
-            const next: PLCConfiguration = { ...config, protocol: 'TELNET_GATEWAY', ipAddress: '127.0.0.1', port: 12345 };
-            setConfig(next);
-            await api.savePLCConfig(next);
-            showToast('success', 'Gateway Telnet activado como driver principal de la estación DL02');
-            await fetchLiveStatus();
-          }}
-          showToast={showToast}
-        />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
         {/* 2. Columna Izquierda: Parámetros de Red y Protocolo */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Card: Selector de Protocolo */}
+          {/* Card: Selector de Protocolo Siemens S7 Exclusivo */}
           <div className="bg-industrial-card border border-industrial-border rounded-2xl p-5 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-industrial-border/60 pb-3">
               <h3 className="text-sm font-extrabold text-white flex items-center space-x-2">
                 <Radio className="w-4 h-4 text-cyan-400" />
-                <span>PROTOCOLO Y DRIVER DE COMUNICACIÓN</span>
+                <span>MÉTODO DE CONEXIÓN PLC</span>
               </h3>
-              <span className="text-[11px] text-slate-400">Seleccione el driver para conectar con la celda</span>
+              <span className="text-[11px] text-cyan-400 font-bold">MÉTODO EXCLUSIVO</span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {PROTOCOLS.map(proto => {
-                const isSelected = config.protocol === proto.id;
-                return (
-                  <button
-                    key={proto.id}
-                    type="button"
-                    onClick={() => handleProtocolSelect(proto.id)}
-                    className={`p-3.5 rounded-xl text-left border transition relative flex flex-col justify-between ${
-                      isSelected
-                        ? 'bg-blue-950/40 border-cyan-500 ring-2 ring-cyan-500/20 shadow-lg shadow-cyan-950/40'
-                        : 'bg-industrial-dark/60 border-industrial-border hover:border-slate-600 hover:bg-slate-900'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-extrabold text-xs text-white flex items-center space-x-1.5">
-                        <Cpu className={`w-3.5 h-3.5 ${isSelected ? 'text-cyan-400' : 'text-slate-400'}`} />
-                        <span>{proto.name}</span>
-                      </span>
-                      <span className={`text-[9px] font-black px-2 py-0.5 rounded tracking-wider uppercase ${
-                        isSelected ? 'bg-cyan-500 text-black font-extrabold' : 'bg-slate-800 text-slate-400'
-                      }`}>
-                        {proto.badge}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 leading-relaxed">{proto.desc}</p>
-                    <div className="mt-2 text-[10px] text-slate-500 font-mono">
-                      Puerto estándar sugerido: <span className="text-slate-300 font-bold">{proto.defaultPort}</span>
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="grid grid-cols-1 gap-3">
+              <div
+                className="p-4 rounded-xl text-left border bg-blue-950/40 border-cyan-500 ring-2 ring-cyan-500/20 shadow-lg shadow-cyan-950/40 flex flex-col justify-between"
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-extrabold text-sm text-white flex items-center space-x-2">
+                    <Cpu className="w-4 h-4 text-cyan-400" />
+                    <span>Siemens S7 (ISO-on-TCP)</span>
+                  </span>
+                  <span className="text-[10px] font-black px-2.5 py-1 rounded tracking-wider uppercase bg-cyan-500 text-black font-extrabold">
+                    DIRECT S7
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed mt-1">
+                  S7-1200 / S7-1500 / S7-300 mediante RFC 1006. Conexión nativa industrial a Data Blocks (DB48).
+                </p>
+                <div className="mt-3 text-xs text-slate-400 font-mono flex items-center justify-between">
+                  <div>
+                    Puerto estándar sugerido: <strong className="text-white font-bold">102</strong>
+                  </div>
+                  <div className="flex items-center space-x-1.5 text-emerald-400 text-xs font-bold">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>DRIVER ACTIVO</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -953,34 +839,20 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
               <div>
                 <h3 className="text-sm font-extrabold text-white flex items-center space-x-2">
                   <FileCode className="w-4 h-4 text-emerald-400" />
-                  <span>MAPEO DE TAGS Y REGISTROS INDUSTRIALES</span>
+                  <span>MAPEO DE REGISTROS SIEMENS (DB48)</span>
                 </h3>
-                <span className="text-[11px] text-slate-400">Nombres de variables CIP / DB de Siemens / Holding Registers Modbus</span>
+                <span className="text-[11px] text-slate-400">Direccionamiento nativo S7 para variables y Data Blocks (DB48)</span>
               </div>
 
               {/* Quick Presets */}
               <div className="flex items-center space-x-2">
-                <span className="text-[10px] uppercase font-bold text-slate-500">Presets:</span>
                 <button
                   type="button"
-                  onClick={() => handleApplyPreset('CIP')}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] font-bold text-blue-300"
+                  onClick={handleApplyPreset}
+                  className="px-3 py-1.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 text-[10px] font-bold text-cyan-300 flex items-center space-x-1.5 transition"
                 >
-                  Rockwell CIP
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleApplyPreset('MODBUS')}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] font-bold text-amber-300"
-                >
-                  Modbus 40001
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleApplyPreset('SIEMENS')}
-                  className="px-2.5 py-1 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 text-[10px] font-bold text-cyan-300 flex items-center space-x-1"
-                >
-                  <span>Siemens S7 (DB48)</span>
+                  <RefreshCw className="w-3 h-3 text-cyan-400" />
+                  <span>Restablecer Mapeo DB48 Predeterminado</span>
                 </button>
               </div>
             </div>

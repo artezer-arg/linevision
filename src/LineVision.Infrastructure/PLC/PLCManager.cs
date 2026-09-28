@@ -36,13 +36,20 @@ public class PLCManager : IPLCService
         {
             PLC_ID = "PLC_DL02",
             StationCode = "DL02",
-            Protocol = "SIMULATOR",
+            Protocol = "SIEMENS_S7",
             IPAddress = "192.168.1.50",
-            Port = 44818,
+            Port = 102,
             PollingIntervalMs = 100,
             TimeoutMs = 2000,
             MaxRetries = 3,
-            Active = true
+            Active = true,
+            TagRecipeA = "DB48.DBW0",
+            TagRecipeB = "DB48.DBW2",
+            TagRecipeReady = "DB48.DBX4.0",
+            TagStationState = "DB48.DBW0",
+            TagRecipeReceived = "DB48.DBX4.0",
+            TagEchoRecipeA = "DB48.DBW2",
+            TagEchoRecipeB = "DB48.DBW2"
         };
 
         // Load persisted config asynchronously
