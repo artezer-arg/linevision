@@ -169,39 +169,6 @@ public class CameraManager : ICameraManager
             _logger.LogInformation("Reconfiguring camera {CameraId}: ProviderType={Provider}, Uri={Uri}",
                 cameraId, providerType, connectionUri);
 
-            // Avoid hardware collision: if configuring a physical USB camera index that is already taken by another camera,
-            // fallback the other camera to SIMULATOR first.
-            if ((string.Equals(providerType, "OPENCV_USB", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(providerType, "PHYSICAL", StringComparison.OrdinalIgnoreCase)) &&
-                int.TryParse(connectionUri, out _))
-            {
-                var existingCameras = (await _db.QueryAsync<CameraConfig>("SELECT * FROM Camera WHERE Active = 1", null, ct)).ToList();
-                var conflicting = existingCameras.FirstOrDefault(c =>
-                    c.CameraId != cameraId &&
-                    (string.Equals(c.ProviderType, "OPENCV_USB", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(c.ProviderType, "PHYSICAL", StringComparison.OrdinalIgnoreCase)) &&
-                    c.ConnectionUri == connectionUri);
-
-                if (conflicting != null)
-                {
-                    _logger.LogWarning("Camera {ConflictingId} is already using physical device {Uri}. Switching conflicting camera to SIMULATOR to prevent hardware conflict.", conflicting.CameraId, connectionUri);
-                    string simUri = $"sim://{conflicting.CameraId.ToLower()}";
-                    await _db.ExecuteAsync("UPDATE Camera SET ProviderType = 'SIMULATOR', ConnectionUri = @simUri WHERE CameraId = @cid",
-                        new { simUri, cid = conflicting.CameraId }, ct);
-
-                    var fallbackCfg = new CameraConfig
-                    {
-                        CameraId = conflicting.CameraId,
-                        Name = conflicting.Name,
-                        StationCode = conflicting.StationCode,
-                        ProviderType = "SIMULATOR",
-                        ConnectionUri = simUri,
-                        Active = true
-                    };
-                    await CreateAndRegisterProviderAsync(fallbackCfg, ct);
-                }
-            }
-
             const string updateSql = @"
                 UPDATE Camera 
                 SET ProviderType = @providerType, ConnectionUri = @connectionUri 

@@ -357,6 +357,15 @@ export const api = {
     return await res.json();
   },
 
+  async configureAllCameras(providerType: string, connectionUri: string) {
+    const res = await fetch(`${API_BASE}/api/camera/configure-all`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ providerType, connectionUri })
+    });
+    return await res.json();
+  },
+
   async getCameraSnapshot(cameraId: string) {
     const res = await fetch(`${API_BASE}/api/camera/${cameraId}/snapshot`);
     return await res.json();

@@ -86,6 +86,21 @@ export const CameraDisplay: React.FC<Props> = ({ frames, activeFailures = [] }) 
     }
   };
 
+  const handleApplyAllConfig = async () => {
+    setIsSaving(true);
+    try {
+      await api.configureAllCameras(targetProvider, targetUri);
+      setSaveSuccess(`¡Las 3 cámaras (Cuna, Panel Superior, Panel Inferior) ahora usan ${targetProvider} (${targetUri})!`);
+      await loadCameraData();
+      setTimeout(() => setSaveSuccess(null), 4000);
+    } catch (e) {
+      console.error(e);
+      alert('Error configurando las cámaras');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const toggleBrowserWebcam = async () => {
     if (!useBrowserWebcam) {
       try {
@@ -449,9 +464,9 @@ export const CameraDisplay: React.FC<Props> = ({ frames, activeFailures = [] }) 
                 </div>
 
                 {/* Quick 1-Click Action for Real Webcam */}
-                <div className="mb-2 p-2 bg-emerald-950/50 border border-emerald-500/60 rounded-lg flex items-center justify-between">
+                <div className="mb-2 p-2.5 bg-emerald-950/60 border border-emerald-500/70 rounded-xl flex items-center justify-between gap-2">
                   <span className="text-[11px] text-emerald-300 font-bold">
-                    💡 Tu cámara web física activa está en el <strong className="underline">Índice DirectShow 0</strong>
+                    💡 <strong>Webcam Física Principal:</strong> Podés usarla en un slot o en los 3 controles a la vez.
                   </span>
                   <button
                     type="button"
@@ -459,7 +474,7 @@ export const CameraDisplay: React.FC<Props> = ({ frames, activeFailures = [] }) 
                       setTargetProvider('OPENCV_USB');
                       setTargetUri('0');
                     }}
-                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[11px] font-black shadow transition"
+                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[11px] font-black shadow transition whitespace-nowrap"
                   >
                     Usar Índice 0
                   </button>
@@ -525,11 +540,11 @@ export const CameraDisplay: React.FC<Props> = ({ frames, activeFailures = [] }) 
               </div>
             </div>
 
-            <div className="flex space-x-3 pt-2">
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setShowConfigModal(false)}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs font-bold text-slate-300 transition"
+                className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs font-bold text-slate-300 transition"
               >
                 Cerrar
               </button>
@@ -537,10 +552,20 @@ export const CameraDisplay: React.FC<Props> = ({ frames, activeFailures = [] }) 
                 type="button"
                 onClick={handleApplyConfig}
                 disabled={isSaving}
-                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 rounded-xl text-xs font-black text-white shadow-lg transition flex items-center justify-center space-x-2"
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 rounded-xl text-xs font-black text-white shadow-lg transition flex items-center justify-center space-x-1.5"
               >
                 {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                <span>{isSaving ? 'Conectando...' : 'Aplicar Fuente en Vivo'}</span>
+                <span>Aplicar a {selectedSlot}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyAllConfig}
+                disabled={isSaving}
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 rounded-xl text-xs font-black text-white shadow-lg transition flex items-center justify-center space-x-1.5"
+                title="Aplica esta misma cámara o simulador a las 3 posiciones (Cuna, Panel Superior, Panel Inferior)"
+              >
+                {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                <span>Usar en los 3 Controles</span>
               </button>
             </div>
           </div>

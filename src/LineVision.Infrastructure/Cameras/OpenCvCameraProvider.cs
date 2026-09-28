@@ -7,17 +7,31 @@ namespace LineVision.Infrastructure.Cameras;
 
 public class OpenCvCameraProvider : ICameraProvider
 {
+    private class SharedDeviceEntry
+    {
+        public string Uri { get; set; } = string.Empty;
+        public VideoCapture? Capture { get; set; }
+        public readonly object Lock = new();
+        public int RefCount { get; set; }
+        public Mat? SharedMat { get; set; }
+        public DateTime LastGrabTime { get; set; } = DateTime.MinValue;
+        public bool IsConnected => Capture != null && !Capture.IsDisposed && Capture.IsOpened();
+    }
+
+    private static readonly object PoolLock = new();
+    private static readonly Dictionary<string, SharedDeviceEntry> SharedPool = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly CameraConfig _config;
     private readonly ILogger<OpenCvCameraProvider> _logger;
-    private VideoCapture? _capture;
+    private SharedDeviceEntry? _entry;
     private bool _isConnected;
     private volatile bool _disposed;
     private readonly object _lock = new();
-    internal static readonly object DirectShowLock = new();
+    public static readonly object DirectShowLock = new();
 
     public string CameraId => _config.CameraId;
     public string Name => _config.Name;
-    public bool IsConnected => _isConnected && !_disposed;
+    public bool IsConnected => _isConnected && !_disposed && (_entry?.IsConnected ?? false);
 
     public OpenCvCameraProvider(CameraConfig config, ILogger<OpenCvCameraProvider> logger)
     {
@@ -37,54 +51,76 @@ public class OpenCvCameraProvider : ICameraProvider
     private bool ConnectInternal()
     {
         if (_disposed) return false;
-        lock (DirectShowLock)
+        string uri = _config.ConnectionUri?.Trim() ?? "0";
+
+        lock (PoolLock)
         {
-            try
-            {
-                DisconnectInternal();
-                if (_disposed) return false;
+            DisconnectInternal();
+            if (_disposed) return false;
 
-                string uri = _config.ConnectionUri?.Trim() ?? "0";
-
-            if (int.TryParse(uri, out int deviceIndex))
+            if (!SharedPool.TryGetValue(uri, out var entry))
             {
-                _capture = new VideoCapture(deviceIndex, VideoCaptureAPIs.DSHOW);
-            }
-            else if (uri.StartsWith("dshow://", StringComparison.OrdinalIgnoreCase) && 
-                     int.TryParse(uri.Substring(8), out int parsedIdx))
-            {
-                _capture = new VideoCapture(parsedIdx, VideoCaptureAPIs.DSHOW);
-            }
-            else if (!string.IsNullOrWhiteSpace(uri))
-            {
-                _capture = new VideoCapture(uri);
-            }
-            else
-            {
-                _capture = new VideoCapture(0, VideoCaptureAPIs.DSHOW);
+                entry = new SharedDeviceEntry { Uri = uri };
+                SharedPool[uri] = entry;
             }
 
-            if (_capture.IsOpened())
+            _entry = entry;
+
+            lock (entry.Lock)
             {
-                _capture.Set(VideoCaptureProperties.FrameWidth, 640);
-                _capture.Set(VideoCaptureProperties.FrameHeight, 480);
-                _isConnected = true;
-                _logger.LogInformation("OpenCvCameraProvider connected for {CameraId} on {Uri}", CameraId, uri);
-                return true;
+                if (entry.Capture == null || entry.Capture.IsDisposed || !entry.Capture.IsOpened())
+                {
+                    try
+                    {
+                        if (int.TryParse(uri, out int deviceIndex))
+                        {
+                            entry.Capture = new VideoCapture(deviceIndex, VideoCaptureAPIs.DSHOW);
+                        }
+                        else if (uri.StartsWith("dshow://", StringComparison.OrdinalIgnoreCase) && 
+                                 int.TryParse(uri.Substring(8), out int parsedIdx))
+                        {
+                            entry.Capture = new VideoCapture(parsedIdx, VideoCaptureAPIs.DSHOW);
+                        }
+                        else if (!string.IsNullOrWhiteSpace(uri))
+                        {
+                            entry.Capture = new VideoCapture(uri);
+                        }
+                        else
+                        {
+                            entry.Capture = new VideoCapture(0, VideoCaptureAPIs.DSHOW);
+                        }
+
+                        if (entry.Capture.IsOpened())
+                        {
+                            entry.Capture.Set(VideoCaptureProperties.FrameWidth, 640);
+                            entry.Capture.Set(VideoCaptureProperties.FrameHeight, 480);
+                            _logger.LogInformation("Opened physical VideoCapture for shared device {Uri}", uri);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("VideoCapture could not open physical device {Uri}", uri);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Exception opening shared physical camera {Uri} for {CameraId}", uri, CameraId);
+                    }
+                }
+
+                if (entry.IsConnected)
+                {
+                    entry.RefCount++;
+                    _isConnected = true;
+                    _logger.LogInformation("OpenCvCameraProvider connected for {CameraId} on shared device {Uri} (RefCount={Count})",
+                        CameraId, uri, entry.RefCount);
+                    return true;
+                }
+                else
+                {
+                    _isConnected = false;
+                    return false;
+                }
             }
-            else
-            {
-                _logger.LogWarning("OpenCvCameraProvider could not open device {Uri} for {CameraId}", uri, CameraId);
-                _isConnected = false;
-                return false;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Exception opening physical camera {CameraId}", CameraId);
-            _isConnected = false;
-            return false;
-        }
         }
     }
 
@@ -100,24 +136,42 @@ public class OpenCvCameraProvider : ICameraProvider
     private void DisconnectInternal()
     {
         _isConnected = false;
-        lock (DirectShowLock)
+        lock (PoolLock)
         {
-            try
+            if (_entry != null)
             {
-                if (_capture != null)
+                string uri = _entry.Uri;
+                lock (_entry.Lock)
                 {
-                    if (!_capture.IsDisposed && _capture.IsOpened())
+                    _entry.RefCount--;
+                    _logger.LogInformation("OpenCvCameraProvider disconnected for {CameraId} on shared device {Uri} (Remaining RefCount={Count})",
+                        CameraId, uri, _entry.RefCount);
+
+                    if (_entry.RefCount <= 0)
                     {
-                        _capture.Release();
+                        try
+                        {
+                            if (_entry.Capture != null)
+                            {
+                                if (!_entry.Capture.IsDisposed && _entry.Capture.IsOpened())
+                                {
+                                    _entry.Capture.Release();
+                                }
+                                _entry.Capture.Dispose();
+                                _entry.Capture = null;
+                            }
+                            _entry.SharedMat?.Dispose();
+                            _entry.SharedMat = null;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Error releasing shared VideoCapture for {Uri}", uri);
+                        }
+
+                        SharedPool.Remove(uri);
                     }
-                    _capture.Dispose();
-                    _capture = null;
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Error releasing VideoCapture for {CameraId}", CameraId);
-                _capture = null;
+                _entry = null;
             }
         }
     }
@@ -132,83 +186,82 @@ public class OpenCvCameraProvider : ICameraProvider
             return Task.FromResult(GetFallbackFrame());
         }
 
-        lock (_lock)
+        var entry = _entry;
+        if (!_isConnected || entry == null || !entry.IsConnected)
         {
-            if (_disposed)
+            if ((DateTime.UtcNow - _lastReconnectAttempt).TotalSeconds >= 5)
             {
+                _lastReconnectAttempt = DateTime.UtcNow;
+                ConnectInternal();
+                entry = _entry;
+            }
+        }
+
+        if (entry == null || !entry.IsConnected)
+        {
+            if (_lastFrame != null) return Task.FromResult(_lastFrame);
+            return Task.FromResult(GetFallbackFrame());
+        }
+
+        lock (entry.Lock)
+        {
+            if (!entry.IsConnected || entry.Capture == null)
+            {
+                if (_lastFrame != null) return Task.FromResult(_lastFrame);
                 return Task.FromResult(GetFallbackFrame());
             }
 
-            if (!_isConnected || _capture == null || _capture.IsDisposed || !_capture.IsOpened())
+            try
             {
-                if ((DateTime.UtcNow - _lastReconnectAttempt).TotalSeconds >= 5)
+                bool needGrab = entry.SharedMat == null || (DateTime.UtcNow - entry.LastGrabTime).TotalMilliseconds > 40;
+                if (needGrab)
                 {
-                    _lastReconnectAttempt = DateTime.UtcNow;
-                    ConnectInternal();
-                }
-            }
-
-            using var mat = new Mat();
-            bool grabbed = false;
-
-            if (_isConnected && _capture != null && !_capture.IsDisposed && _capture.IsOpened())
-            {
-                lock (DirectShowLock)
-                {
-                    try
+                    entry.SharedMat ??= new Mat();
+                    bool grabbed = entry.Capture.Read(entry.SharedMat);
+                    if (grabbed && !entry.SharedMat.Empty())
                     {
-                        if (!_disposed && _isConnected && _capture != null && !_capture.IsDisposed && _capture.IsOpened())
-                        {
-                            grabbed = _capture.Read(mat);
-                        }
+                        entry.LastGrabTime = DateTime.UtcNow;
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        _logger.LogWarning("Exception reading from camera {CameraId}: {Err}", CameraId, ex.Message);
-                        grabbed = false;
+                        _logger.LogWarning("Camera frame read returned empty for shared device {Uri}", entry.Uri);
                     }
                 }
-            }
 
-            if (!grabbed || mat.Empty())
-            {
-                if (_isConnected)
+                if (entry.SharedMat != null && !entry.SharedMat.Empty())
                 {
-                    _logger.LogWarning("Camera frame read failed for {CameraId}, marking disconnected", CameraId);
-                    DisconnectInternal();
+                    using var cloneMat = entry.SharedMat.Clone();
+                    Cv2.PutText(cloneMat, $"{CameraId} | LIVE USB | {DateTime.UtcNow:HH:mm:ss.fff}", new Point(15, 25),
+                        HersheyFonts.HersheySimplex, 0.45, new Scalar(0, 255, 120), 1);
+
+                    Cv2.ImEncode(".jpg", cloneMat, out byte[] jpgBytes, new ImageEncodingParam(ImwriteFlags.JpegQuality, 80));
+
+                    _lastFrame = new CameraFrame
+                    {
+                        CameraId = CameraId,
+                        Width = cloneMat.Width,
+                        Height = cloneMat.Height,
+                        Channels = cloneMat.Channels(),
+                        Data = cloneMat.ToBytes(),
+                        Base64Jpeg = Convert.ToBase64String(jpgBytes),
+                        Timestamp = DateTime.UtcNow
+                    };
+
+                    return Task.FromResult(_lastFrame);
                 }
             }
-
-            if (grabbed && !mat.Empty())
+            catch (Exception ex)
             {
-                // Draw industrial HUD timestamp on physical frame
-                Cv2.PutText(mat, $"{CameraId} | LIVE USB | {DateTime.UtcNow:HH:mm:ss.fff}", new Point(15, 25),
-                    HersheyFonts.HersheySimplex, 0.45, new Scalar(0, 255, 120), 1);
-
-                Cv2.ImEncode(".jpg", mat, out byte[] jpgBytes, new ImageEncodingParam(ImwriteFlags.JpegQuality, 80));
-
-                _lastFrame = new CameraFrame
-                {
-                    CameraId = CameraId,
-                    Width = mat.Width,
-                    Height = mat.Height,
-                    Channels = mat.Channels(),
-                    Data = mat.ToBytes(),
-                    Base64Jpeg = Convert.ToBase64String(jpgBytes),
-                    Timestamp = DateTime.UtcNow
-                };
-
-                return Task.FromResult(_lastFrame);
+                _logger.LogWarning(ex, "Exception capturing frame for {CameraId} from shared device {Uri}", CameraId, entry.Uri);
             }
-
-            // If still empty but have previous frame, return last known good frame
-            if (_lastFrame != null)
-            {
-                return Task.FromResult(_lastFrame);
-            }
-
-            return Task.FromResult(GetFallbackFrame());
         }
+
+        if (_lastFrame != null)
+        {
+            return Task.FromResult(_lastFrame);
+        }
+
+        return Task.FromResult(GetFallbackFrame());
     }
 
     private CameraFrame GetFallbackFrame()

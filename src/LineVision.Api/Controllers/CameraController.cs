@@ -58,6 +58,27 @@ public class CameraController : ControllerBase
         });
     }
 
+    [HttpPost("configure-all")]
+    public async Task<IActionResult> ConfigureAllCameras([FromBody] CameraConfigureAllRequest request)
+    {
+        string provider = string.IsNullOrWhiteSpace(request.ProviderType) ? "OPENCV_USB" : request.ProviderType.ToUpperInvariant();
+        string uri = request.ConnectionUri ?? "0";
+
+        var configs = await _cameraManager.GetCameraConfigurationsAsync();
+        foreach (var c in configs)
+        {
+            await _cameraManager.ConfigureCameraProviderAsync(c.CameraId, provider, uri);
+        }
+
+        return Ok(new
+        {
+            Message = $"Todas las {configs.Count} cámaras fueron configuradas con éxito a {provider} ({uri})",
+            ProviderType = provider,
+            ConnectionUri = uri,
+            ConfiguredCameras = configs.Select(c => c.CameraId).ToList()
+        });
+    }
+
     [HttpGet("{id}/snapshot")]
     public async Task<IActionResult> GetSnapshot(string id)
     {
@@ -84,5 +105,11 @@ public class CameraConfigureRequest
 {
     public string CameraId { get; set; } = string.Empty;
     public string ProviderType { get; set; } = "SIMULATOR"; // "SIMULATOR", "OPENCV_USB", "PHYSICAL", "RTSP"
+    public string ConnectionUri { get; set; } = "0"; // Device Index e.g. "0", "1" or RTSP URL
+}
+
+public class CameraConfigureAllRequest
+{
+    public string ProviderType { get; set; } = "OPENCV_USB"; // "SIMULATOR", "OPENCV_USB", "PHYSICAL", "RTSP"
     public string ConnectionUri { get; set; } = "0"; // Device Index e.g. "0", "1" or RTSP URL
 }
