@@ -2,26 +2,63 @@
 
 :root {
   color-scheme: dark;
+  --hud-bg: #141720;
+  --hud-card: #1c202b;
+  --hud-surface: #232836;
+  --hud-border: #2c3345;
+  --hud-orange: #ff6b35;
+  --hud-cyan: #00e5a3;
 }
 
 body {
   margin: 0;
-  background-color: #0b0d11;
-  color: #f3f4f6;
+  background-color: var(--hud-bg);
+  color: #f1f5f9;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   overflow-x: hidden;
   user-select: none;
 }
 
-/* Custom industrial theme colors */
+/* Custom industrial & HUD theme colors */
+.bg-hud-dark {
+  background-color: var(--hud-bg);
+}
+.bg-hud-card {
+  background-color: var(--hud-card);
+}
+.bg-hud-surface {
+  background-color: var(--hud-surface);
+}
+.border-hud {
+  border-color: var(--hud-border);
+}
+
+.text-hud-orange {
+  color: var(--hud-orange);
+}
+.bg-hud-orange {
+  background-color: var(--hud-orange);
+}
+.border-hud-orange {
+  border-color: var(--hud-orange);
+}
+
+.text-hud-cyan {
+  color: var(--hud-cyan);
+}
+.bg-hud-cyan {
+  background-color: var(--hud-cyan);
+}
+
+/* Backward compatibility classes */
 .bg-industrial-dark {
-  background-color: #121418;
+  background-color: var(--hud-bg);
 }
 .bg-industrial-card {
-  background-color: #1a1d24;
+  background-color: var(--hud-card);
 }
 .border-industrial-border {
-  border-color: #2a2f3a;
+  border-color: var(--hud-border);
 }
 
 /* Custom industrial scrollbars */
@@ -30,12 +67,24 @@ body {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #121418;
+  background: #141720;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a2f3a;
+  background: #2c3345;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3b4252;
+  background: #3d465d;
+}
+
+/* Stepped ruler ticks */
+.ruler-tick {
+  width: 1px;
+  background-color: #3b445c;
+  height: 8px;
+}
+.ruler-tick-tall {
+  width: 1.5px;
+  background-color: #64748b;
+  height: 14px;
 }
