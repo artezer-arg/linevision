@@ -11,11 +11,13 @@ public class OpenCvCameraProvider : ICameraProvider
     private readonly ILogger<OpenCvCameraProvider> _logger;
     private VideoCapture? _capture;
     private bool _isConnected;
+    private volatile bool _disposed;
     private readonly object _lock = new();
+    internal static readonly object DirectShowLock = new();
 
     public string CameraId => _config.CameraId;
     public string Name => _config.Name;
-    public bool IsConnected => _isConnected;
+    public bool IsConnected => _isConnected && !_disposed;
 
     public OpenCvCameraProvider(CameraConfig config, ILogger<OpenCvCameraProvider> logger)
     {
@@ -25,6 +27,7 @@ public class OpenCvCameraProvider : ICameraProvider
 
     public Task<bool> ConnectAsync(CancellationToken ct = default)
     {
+        if (_disposed) return Task.FromResult(false);
         lock (_lock)
         {
             return Task.FromResult(ConnectInternal());
@@ -33,11 +36,15 @@ public class OpenCvCameraProvider : ICameraProvider
 
     private bool ConnectInternal()
     {
-        try
+        if (_disposed) return false;
+        lock (DirectShowLock)
         {
-            DisconnectInternal();
+            try
+            {
+                DisconnectInternal();
+                if (_disposed) return false;
 
-            string uri = _config.ConnectionUri?.Trim() ?? "0";
+                string uri = _config.ConnectionUri?.Trim() ?? "0";
 
             if (int.TryParse(uri, out int deviceIndex))
             {
@@ -78,6 +85,7 @@ public class OpenCvCameraProvider : ICameraProvider
             _isConnected = false;
             return false;
         }
+        }
     }
 
     public Task DisconnectAsync()
@@ -92,33 +100,46 @@ public class OpenCvCameraProvider : ICameraProvider
     private void DisconnectInternal()
     {
         _isConnected = false;
-        try
+        lock (DirectShowLock)
         {
-            if (_capture != null)
+            try
             {
-                if (_capture.IsOpened())
+                if (_capture != null)
                 {
-                    _capture.Release();
+                    if (!_capture.IsDisposed && _capture.IsOpened())
+                    {
+                        _capture.Release();
+                    }
+                    _capture.Dispose();
+                    _capture = null;
                 }
-                _capture.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error releasing VideoCapture for {CameraId}", CameraId);
                 _capture = null;
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Error releasing VideoCapture for {CameraId}", CameraId);
         }
     }
 
     private CameraFrame? _lastFrame;
-
     private DateTime _lastReconnectAttempt = DateTime.MinValue;
 
     public Task<CameraFrame> CaptureFrameAsync(CancellationToken ct = default)
     {
+        if (_disposed)
+        {
+            return Task.FromResult(GetFallbackFrame());
+        }
+
         lock (_lock)
         {
-            if (!_isConnected || _capture == null || !_capture.IsOpened())
+            if (_disposed)
+            {
+                return Task.FromResult(GetFallbackFrame());
+            }
+
+            if (!_isConnected || _capture == null || _capture.IsDisposed || !_capture.IsOpened())
             {
                 if ((DateTime.UtcNow - _lastReconnectAttempt).TotalSeconds >= 5)
                 {
@@ -130,16 +151,22 @@ public class OpenCvCameraProvider : ICameraProvider
             using var mat = new Mat();
             bool grabbed = false;
 
-            if (_isConnected && _capture != null && _capture.IsOpened())
+            if (_isConnected && _capture != null && !_capture.IsDisposed && _capture.IsOpened())
             {
-                try
+                lock (DirectShowLock)
                 {
-                    grabbed = _capture.Read(mat);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning("Exception reading from camera {CameraId}: {Err}", CameraId, ex.Message);
-                    grabbed = false;
+                    try
+                    {
+                        if (!_disposed && _isConnected && _capture != null && !_capture.IsDisposed && _capture.IsOpened())
+                        {
+                            grabbed = _capture.Read(mat);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Exception reading from camera {CameraId}: {Err}", CameraId, ex.Message);
+                        grabbed = false;
+                    }
                 }
             }
 
@@ -180,37 +207,40 @@ public class OpenCvCameraProvider : ICameraProvider
                 return Task.FromResult(_lastFrame);
             }
 
-            // Emergency fallback frame so caller never crashes
-            using var fallbackMat = new Mat(480, 640, MatType.CV_8UC3, new Scalar(25, 25, 30));
-            Cv2.PutText(fallbackMat, $"{CameraId}: CONECTANDO A CAMARA USB...", new Point(80, 240),
-                HersheyFonts.HersheySimplex, 0.6, new Scalar(0, 200, 255), 2);
-            Cv2.ImEncode(".jpg", fallbackMat, out byte[] fallbackBytes, new ImageEncodingParam(ImwriteFlags.JpegQuality, 80));
-
-            return Task.FromResult(new CameraFrame
-            {
-                CameraId = CameraId,
-                Width = 640,
-                Height = 480,
-                Channels = 3,
-                Data = fallbackMat.ToBytes(),
-                Base64Jpeg = Convert.ToBase64String(fallbackBytes),
-                Timestamp = DateTime.UtcNow
-            });
+            return Task.FromResult(GetFallbackFrame());
         }
+    }
+
+    private CameraFrame GetFallbackFrame()
+    {
+        using var fallbackMat = new Mat(480, 640, MatType.CV_8UC3, new Scalar(25, 25, 30));
+        Cv2.PutText(fallbackMat, $"{CameraId}: CONECTANDO A CAMARA USB...", new Point(80, 240),
+            HersheyFonts.HersheySimplex, 0.6, new Scalar(0, 200, 255), 2);
+        Cv2.ImEncode(".jpg", fallbackMat, out byte[] fallbackBytes, new ImageEncodingParam(ImwriteFlags.JpegQuality, 80));
+
+        return new CameraFrame
+        {
+            CameraId = CameraId,
+            Width = 640,
+            Height = 480,
+            Channels = 3,
+            Data = fallbackMat.ToBytes(),
+            Base64Jpeg = Convert.ToBase64String(fallbackBytes),
+            Timestamp = DateTime.UtcNow
+        };
     }
 
     public void SetSimulationImage(byte[] imageBytes)
     {
-        // Physical camera does not use synthetic simulation image
     }
 
     public void SetSimulationPattern(string pattern)
     {
-        // Physical camera does not use synthetic simulation pattern
     }
 
     public async ValueTask DisposeAsync()
     {
+        _disposed = true;
         await DisconnectAsync();
     }
 }

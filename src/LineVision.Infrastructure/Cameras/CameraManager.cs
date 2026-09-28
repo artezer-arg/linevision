@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using LineVision.Core.Domain.Interfaces;
 using LineVision.Core.Domain.Models;
@@ -11,7 +12,7 @@ public class CameraManager : ICameraManager
     private readonly IDatabaseService _db;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<CameraManager> _logger;
-    private readonly Dictionary<string, ICameraProvider> _cameras = new();
+    private readonly ConcurrentDictionary<string, ICameraProvider> _cameras = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     public CameraManager(IDatabaseService db, ILoggerFactory loggerFactory, ILogger<CameraManager> logger)
@@ -66,7 +67,7 @@ public class CameraManager : ICameraManager
 
     private async Task CreateAndRegisterProviderAsync(CameraConfig cfg, CancellationToken ct)
     {
-        if (_cameras.TryGetValue(cfg.CameraId, out var oldProvider))
+        if (_cameras.TryRemove(cfg.CameraId, out var oldProvider))
         {
             try
             {
@@ -76,7 +77,6 @@ public class CameraManager : ICameraManager
             {
                 _logger.LogDebug(ex, "Error disposing previous camera provider for {CameraId}", cfg.CameraId);
             }
-            _cameras.Remove(cfg.CameraId);
         }
 
         ICameraProvider provider;
@@ -122,7 +122,7 @@ public class CameraManager : ICameraManager
 
     public IReadOnlyCollection<ICameraProvider> GetAllCameras()
     {
-        return _cameras.Values;
+        return _cameras.Values.ToList();
     }
 
     public async Task<Dictionary<string, CameraFrame>> CaptureAllFramesAsync(CancellationToken ct = default)
@@ -168,6 +168,39 @@ public class CameraManager : ICameraManager
         {
             _logger.LogInformation("Reconfiguring camera {CameraId}: ProviderType={Provider}, Uri={Uri}",
                 cameraId, providerType, connectionUri);
+
+            // Avoid hardware collision: if configuring a physical USB camera index that is already taken by another camera,
+            // fallback the other camera to SIMULATOR first.
+            if ((string.Equals(providerType, "OPENCV_USB", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(providerType, "PHYSICAL", StringComparison.OrdinalIgnoreCase)) &&
+                int.TryParse(connectionUri, out _))
+            {
+                var existingCameras = (await _db.QueryAsync<CameraConfig>("SELECT * FROM Camera WHERE Active = 1", null, ct)).ToList();
+                var conflicting = existingCameras.FirstOrDefault(c =>
+                    c.CameraId != cameraId &&
+                    (string.Equals(c.ProviderType, "OPENCV_USB", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(c.ProviderType, "PHYSICAL", StringComparison.OrdinalIgnoreCase)) &&
+                    c.ConnectionUri == connectionUri);
+
+                if (conflicting != null)
+                {
+                    _logger.LogWarning("Camera {ConflictingId} is already using physical device {Uri}. Switching conflicting camera to SIMULATOR to prevent hardware conflict.", conflicting.CameraId, connectionUri);
+                    string simUri = $"sim://{conflicting.CameraId.ToLower()}";
+                    await _db.ExecuteAsync("UPDATE Camera SET ProviderType = 'SIMULATOR', ConnectionUri = @simUri WHERE CameraId = @cid",
+                        new { simUri, cid = conflicting.CameraId }, ct);
+
+                    var fallbackCfg = new CameraConfig
+                    {
+                        CameraId = conflicting.CameraId,
+                        Name = conflicting.Name,
+                        StationCode = conflicting.StationCode,
+                        ProviderType = "SIMULATOR",
+                        ConnectionUri = simUri,
+                        Active = true
+                    };
+                    await CreateAndRegisterProviderAsync(fallbackCfg, ct);
+                }
+            }
 
             const string updateSql = @"
                 UPDATE Camera 
@@ -232,18 +265,21 @@ public class CameraManager : ICameraManager
             {
                 try
                 {
-                    using var cap = new VideoCapture(i, VideoCaptureAPIs.DSHOW);
-                    if (cap.IsOpened())
+                    lock (OpenCvCameraProvider.DirectShowLock)
                     {
-                        isAvailable = true;
-                        using var testMat = new Mat();
-                        for (int f = 0; f < 3; f++) cap.Read(testMat);
-                        if (!testMat.Empty())
+                        using var cap = new VideoCapture(i, VideoCaptureAPIs.DSHOW);
+                        if (cap.IsOpened())
                         {
-                            var mean = Cv2.Mean(testMat);
-                            hasLiveLight = (mean.Val0 + mean.Val1 + mean.Val2) > 20.0;
+                            isAvailable = true;
+                            using var testMat = new Mat();
+                            for (int f = 0; f < 3; f++) cap.Read(testMat);
+                            if (!testMat.Empty())
+                            {
+                                var mean = Cv2.Mean(testMat);
+                                hasLiveLight = (mean.Val0 + mean.Val1 + mean.Val2) > 20.0;
+                            }
+                            cap.Release();
                         }
-                        cap.Release();
                     }
                 }
                 catch
