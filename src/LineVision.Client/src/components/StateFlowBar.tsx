@@ -16,7 +16,15 @@ interface FlowStep {
   sub: string;
 }
 
-const FLOW_5_STEPS: FlowStep[] = [
+const FLOW_5_STEPS_RECIPE_FIRST: FlowStep[] = [
+  { id: 'ORDER', label: '1. CONSULTA DB', sub: 'Secuencia, Mano y Posición' },
+  { id: 'RECIPE', label: '2. RECETA PLC', sub: 'Envío Directo a DB48.DBW2' },
+  { id: 'CRADLE', label: '3. CONTROL CUNA', sub: 'Mano, Posición e Insertos (NG: Reintento)' },
+  { id: 'PANEL', label: '4. CONTROL PANEL', sub: 'Inspección & Confirmación DB48.DBX4.0' },
+  { id: 'NEXT', label: '5. SIGUIENTE', sub: 'Registro Trazabilidad & Avance Puntero' }
+];
+
+const FLOW_5_STEPS_CRADLE_FIRST: FlowStep[] = [
   { id: 'ORDER', label: '1. CONSULTA DB', sub: 'Secuencia, Mano y Posición' },
   { id: 'CRADLE', label: '2. CONTROL CUNA', sub: 'Mano, Posición e Insertos (NG: Reintento)' },
   { id: 'RECIPE', label: '3. RECETA PLC', sub: 'Envío Entero a DB48.DBW2' },
@@ -35,7 +43,10 @@ const FLOW_6_STEPS_LEGACY: FlowStep[] = [
 
 export const StateFlowBar: React.FC<Props> = ({ state, cycle, workflowConfig }) => {
   const isDirect5Step = !workflowConfig || workflowConfig.workflowMode !== 'LEGACY_ROBOT_HANDSHAKE';
-  const steps = isDirect5Step ? FLOW_5_STEPS : FLOW_6_STEPS_LEGACY;
+  const isRecipeImmediate = !workflowConfig || workflowConfig.recipeTiming !== 'AFTER_CRADLE_OK';
+  const steps = isDirect5Step
+    ? (isRecipeImmediate ? FLOW_5_STEPS_RECIPE_FIRST : FLOW_5_STEPS_CRADLE_FIRST)
+    : FLOW_6_STEPS_LEGACY;
 
   const getStepStatus = (stepId: string): StepStatus => {
     const errCode = cycle?.errorCode || '';
@@ -52,18 +63,20 @@ export const StateFlowBar: React.FC<Props> = ({ state, cycle, workflowConfig }) 
           if (cycle?.cradleResult === 'OK') return 'GREEN';
           if (cycle?.cradleResult === 'NOK' || errCode.includes('CRADLE')) return 'RED';
           if (state === 'CHECKING_CRADLE') return 'YELLOW';
-          if (['CRADLE_OK', 'LOADING_RECIPE', 'SENDING_RECIPE', 'WAITING_RECIPE_CONFIRMATION', 'RECIPE_CONFIRMED', 'LOADING_PANEL_INSPECTION_PLAN', 'CHECKING_PANEL', 'PANEL_OK', 'SAVING_STATION_RESULT', 'CYCLE_COMPLETE'].includes(state))
+          if (['CRADLE_OK', 'LOADING_PANEL_INSPECTION_PLAN', 'CHECKING_PANEL', 'PANEL_OK', 'SAVING_STATION_RESULT', 'CYCLE_COMPLETE'].includes(state))
             return 'GREEN';
-          if (state === 'ORDER_LOADED') return 'BLUE';
+          if (!isRecipeImmediate && state === 'ORDER_LOADED') return 'BLUE';
+          if (isRecipeImmediate && (state === 'RECIPE_CONFIRMED' || cycle?.recipe_A != null)) return 'BLUE';
           return 'GRAY';
 
         case 'RECIPE':
-          if (['RECIPE_CONFIRMED', 'LOADING_PANEL_INSPECTION_PLAN', 'CHECKING_PANEL', 'PANEL_OK', 'SAVING_STATION_RESULT', 'CYCLE_COMPLETE'].includes(state) || cycle?.recipe_A != null)
+          if (cycle?.recipe_A != null || ['RECIPE_CONFIRMED', 'LOADING_PANEL_INSPECTION_PLAN', 'CHECKING_PANEL', 'PANEL_OK', 'SAVING_STATION_RESULT', 'CYCLE_COMPLETE'].includes(state))
             return 'GREEN';
           if (state === 'LOADING_RECIPE' || state === 'SENDING_RECIPE') return 'YELLOW';
           if (state === 'WAITING_RECIPE_CONFIRMATION') return 'BLUE';
           if (isError && errCode.includes('RECIPE')) return 'RED';
-          if (state === 'CRADLE_OK') return 'BLUE';
+          if (isRecipeImmediate && state === 'ORDER_LOADED') return 'BLUE';
+          if (!isRecipeImmediate && state === 'CRADLE_OK') return 'BLUE';
           return 'GRAY';
 
         case 'PANEL':
@@ -72,7 +85,7 @@ export const StateFlowBar: React.FC<Props> = ({ state, cycle, workflowConfig }) 
           if (state === 'CHECKING_PANEL' || state === 'LOADING_PANEL_INSPECTION_PLAN') return 'YELLOW';
           if (['PANEL_OK', 'SAVING_STATION_RESULT', 'CYCLE_COMPLETE'].includes(state))
             return 'GREEN';
-          if (state === 'RECIPE_CONFIRMED') return 'BLUE';
+          if (cycle?.cradleResult === 'OK' || state === 'CRADLE_OK') return 'BLUE';
           return 'GRAY';
 
         case 'NEXT':

@@ -312,6 +312,7 @@ export interface StationWorkflowConfig {
   recipeAddress: string;
   confirmationAddress: string;
   sendConfirmation: boolean;
+  recipeTiming?: 'AFTER_ORDER_DETECTED' | 'AFTER_CRADLE_OK';
   confirmationValue: boolean;
   retryIntervalMs: number;
   displayDelayMs: number;

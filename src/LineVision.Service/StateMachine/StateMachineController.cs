@@ -156,6 +156,8 @@ public class StateMachineController : IStateMachineController
         {
             (StationState.WAITING_ORDER, StationTrigger.OrderDetected) => StationState.ORDER_LOADED,
             (StationState.ORDER_LOADED, StationTrigger.OrderDetected) => StationState.ORDER_LOADED,
+            (StationState.ORDER_LOADED, StationTrigger.RecipeLoaded) => StationState.LOADING_RECIPE,
+            (StationState.ORDER_LOADED, StationTrigger.RecipeSent) => StationState.SENDING_RECIPE,
             (StationState.ORDER_LOADED, StationTrigger.CradleCheckStarted) => StationState.CHECKING_CRADLE,
             
             // Inspección de cuna y reintentos (Paso 2)
@@ -200,7 +202,8 @@ public class StateMachineController : IStateMachineController
             (StationState.WAITING_RECIPE_CONFIRMATION, StationTrigger.RecipeEchoVerified) => StationState.RECIPE_CONFIRMED,
             (StationState.WAITING_RECIPE_CONFIRMATION, StationTrigger.RecipeEchoMismatch) => StationState.ERROR,
 
-            // Flujo 5 Pasos: Receta Confirmada -> Inspección de Panel (Paso 4)
+            // Flujo 5 Pasos: Receta Confirmada -> Inspección de Cuna (si receta fue primero) o Inspección de Panel
+            (StationState.RECIPE_CONFIRMED, StationTrigger.CradleCheckStarted) => StationState.CHECKING_CRADLE,
             (StationState.RECIPE_CONFIRMED, StationTrigger.PanelPlanLoaded) => StationState.LOADING_PANEL_INSPECTION_PLAN,
             (StationState.RECIPE_CONFIRMED, StationTrigger.PanelCheckStarted) => StationState.CHECKING_PANEL,
 

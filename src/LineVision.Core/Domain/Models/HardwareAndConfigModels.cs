@@ -244,6 +244,13 @@ public class StationWorkflowConfig
     public bool SendConfirmation { get; set; } = true;
 
     /// <summary>
+    /// Momento de envío de la receta al PLC Siemens (DB48.DBW2):
+    /// "AFTER_ORDER_DETECTED": Inmediatamente después de constatar modelo, mano y posición (Paso 2 directo).
+    /// "AFTER_CRADLE_OK": Luego de validar que la cuna esté OK.
+    /// </summary>
+    public string RecipeTiming { get; set; } = "AFTER_ORDER_DETECTED";
+
+    /// <summary>
     /// Valor del booleano de confirmación enviado en caso de OK (default true)
     /// </summary>
     public bool ConfirmationValue { get; set; } = true;

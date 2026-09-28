@@ -38,6 +38,7 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
     recipeAddress: 'DB48.DBW2',
     confirmationAddress: 'DB48.DBX4.0',
     sendConfirmation: true,
+    recipeTiming: 'AFTER_ORDER_DETECTED',
     confirmationValue: true,
     retryIntervalMs: 1000,
     displayDelayMs: 2000,
@@ -468,28 +469,53 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
                   Secuencia directa optimizada de 5 pasos con comunicación directa S7 al PLC Siemens S7-1500 (DB48) y reintentos automáticos continuos ante No Conforme (NG):
                 </p>
 
-                <ol className="text-xs space-y-2 text-slate-300 font-mono bg-black/40 p-3.5 rounded-xl border border-slate-800">
-                  <li className="flex items-start space-x-2">
-                    <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</span>
-                    <span><strong>1. Consulta DB:</strong> Obtiene secuencia, mano y posición automáticamente.</span>
-                  </li>
-                  <li className="flex items-start space-x-2">
-                    <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</span>
-                    <span><strong>2. Control Cuna:</strong> 2.a OK pasa a 3; 2.b NG muestra error hasta colocar la correcta.</span>
-                  </li>
-                  <li className="flex items-start space-x-2">
-                    <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">3</span>
-                    <span><strong>3. Receta PLC:</strong> Envío de número entero indicando qué hacer (DB48.DBW2).</span>
-                  </li>
-                  <li className="flex items-start space-x-2">
-                    <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">4</span>
-                    <span><strong>4. Control Panel:</strong> 4.a OK envía booleano True a DB48.DBX4.0; 4.b NG reintenta.</span>
-                  </li>
-                  <li className="flex items-start space-x-2">
-                    <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">5</span>
-                    <span><strong>5. Siguiente Panel:</strong> Commit Produccion_Secuencia y avance automático de orden.</span>
-                  </li>
-                </ol>
+                {workflowConfig.recipeTiming !== 'AFTER_CRADLE_OK' ? (
+                  <ol className="text-xs space-y-2 text-slate-300 font-mono bg-black/40 p-3.5 rounded-xl border border-slate-800">
+                    <li className="flex items-start space-x-2">
+                      <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</span>
+                      <span><strong>1. Consulta DB:</strong> Obtiene secuencia, mano y posición automáticamente.</span>
+                    </li>
+                    <li className="flex items-start space-x-2">
+                      <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</span>
+                      <span><strong>2. Receta PLC (Directo):</strong> Escribe de inmediato el entero al PLC (DB48.DBW2).</span>
+                    </li>
+                    <li className="flex items-start space-x-2">
+                      <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">3</span>
+                      <span><strong>3. Control Cuna:</strong> 3.a OK pasa a 4; 3.b NG muestra error hasta colocar la correcta.</span>
+                    </li>
+                    <li className="flex items-start space-x-2">
+                      <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">4</span>
+                      <span><strong>4. Control Panel:</strong> 4.a OK envía booleano True a DB48.DBX4.0; 4.b NG reintenta.</span>
+                    </li>
+                    <li className="flex items-start space-x-2">
+                      <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">5</span>
+                      <span><strong>5. Siguiente Panel:</strong> Commit Produccion_Secuencia y avance automático de orden.</span>
+                    </li>
+                  </ol>
+                ) : (
+                  <ol className="text-xs space-y-2 text-slate-300 font-mono bg-black/40 p-3.5 rounded-xl border border-slate-800">
+                    <li className="flex items-start space-x-2">
+                      <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</span>
+                      <span><strong>1. Consulta DB:</strong> Obtiene secuencia, mano y posición automáticamente.</span>
+                    </li>
+                    <li className="flex items-start space-x-2">
+                      <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</span>
+                      <span><strong>2. Control Cuna:</strong> 2.a OK pasa a 3; 2.b NG muestra error hasta colocar la correcta.</span>
+                    </li>
+                    <li className="flex items-start space-x-2">
+                      <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">3</span>
+                      <span><strong>3. Receta PLC:</strong> Envío de número entero indicando qué hacer (DB48.DBW2).</span>
+                    </li>
+                    <li className="flex items-start space-x-2">
+                      <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">4</span>
+                      <span><strong>4. Control Panel:</strong> 4.a OK envía booleano True a DB48.DBX4.0; 4.b NG reintenta.</span>
+                    </li>
+                    <li className="flex items-start space-x-2">
+                      <span className="w-4 h-4 rounded-full bg-cyan-900 text-cyan-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">5</span>
+                      <span><strong>5. Siguiente Panel:</strong> Commit Produccion_Secuencia y avance automático de orden.</span>
+                    </li>
+                  </ol>
+                )}
               </div>
 
               {/* Opción 2: 6 Pasos Tradicional Robot Handshake */}
@@ -556,6 +582,47 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
                   <span>PARÁMETROS DE COMUNICACIÓN S7 Y COMPORTAMIENTO (MODO 5 PASOS)</span>
                 </h4>
 
+                {/* Selector de Momento de Envío de Receta */}
+                <div className="bg-gradient-to-r from-blue-950/60 to-cyan-950/40 border border-cyan-500/40 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md">
+                  <div>
+                    <span className="text-xs font-black text-cyan-300 block flex items-center space-x-2">
+                      <Send className="w-4 h-4 text-cyan-400" />
+                      <span>MOMENTO DE ENVÍO DE LA RECETA AL PLC (DB48.DBW2)</span>
+                    </span>
+                    <span className="text-[11px] text-slate-300 mt-0.5 block">
+                      {workflowConfig.recipeTiming !== 'AFTER_CRADLE_OK'
+                        ? 'Envío Inmediato (Paso 2): Escribe la receta al Siemens S7 inmediatamente al constatar modelo, mano y posición desde la DB.'
+                        : 'Envío tras Cuna (Paso 3): Espera a que el control de cuna dé OK para escribir la receta al PLC.'}
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setWorkflowConfig(prev => ({ ...prev, recipeTiming: 'AFTER_ORDER_DETECTED' }))}
+                      className={`px-3.5 py-2 rounded-lg text-xs font-extrabold flex items-center space-x-1.5 transition ${
+                        workflowConfig.recipeTiming !== 'AFTER_CRADLE_OK'
+                          ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-950/60 ring-2 ring-cyan-300'
+                          : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <span>Inmediato (Tras DB)</span>
+                      {workflowConfig.recipeTiming !== 'AFTER_CRADLE_OK' && <CheckCircle2 className="w-3.5 h-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWorkflowConfig(prev => ({ ...prev, recipeTiming: 'AFTER_CRADLE_OK' }))}
+                      className={`px-3.5 py-2 rounded-lg text-xs font-extrabold flex items-center space-x-1.5 transition ${
+                        workflowConfig.recipeTiming === 'AFTER_CRADLE_OK'
+                          ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-950/60 ring-2 ring-cyan-300'
+                          : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <span>Tras Cuna OK</span>
+                      {workflowConfig.recipeTiming === 'AFTER_CRADLE_OK' && <CheckCircle2 className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {/* IP PLC */}
                   <div>
@@ -571,7 +638,7 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
                   {/* Dirección Receta */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                      Dirección Receta (Paso 3)
+                      Dirección Receta ({workflowConfig.recipeTiming !== 'AFTER_CRADLE_OK' ? 'Paso 2' : 'Paso 3'})
                     </label>
                     <input
                       type="text"

@@ -205,10 +205,50 @@ public class StationOrchestrator : BackgroundService
         _logger.LogInformation("STEP 1 [DB QUERY]: Order loaded - Secuencia={Seq}, Modelo={Model}, Mano={Hand}, Posicion={Pos}",
             order.Secuencia, order.Modelo, order.Mano, order.Posicion);
 
+        bool sendRecipeImmediately = !string.Equals(workflowConfig.RecipeTiming, "AFTER_CRADLE_OK", StringComparison.OrdinalIgnoreCase);
+
         // ---------------------------------------------------------------------
-        // PASO 2: CONTROLO CUNA
-        // 2.a Es OK, sigo al paso 3
-        // 2.b Es NG, muestro error hasta que coloque la correcta
+        // ENVÍO INMEDIATO DE RECETA AL PLC (SI ESTÁ CONFIGURADO "AFTER_ORDER_DETECTED", POR DEFECTO)
+        // Directamente tras constatar modelo, mano y posición desde la DB
+        // ---------------------------------------------------------------------
+        if (sendRecipeImmediately)
+        {
+            var immediateRecipe = await _recipeService.GetRecipeAsync(_stationCode, order.Modelo, order.Mano, order.Posicion, ct);
+            short recipeInt = (short)(immediateRecipe?.Recipe_A ?? 1);
+
+            _logger.LogInformation("STEP 2 [PLC RECIPE DIRECT]: Escribiendo receta {Recipe} (nModeloCamara) directamente al PLC Siemens ({Ip}:{Addr}) tras constatar Modelo={Model}, Mano={Hand}, Posicion={Pos}",
+                recipeInt, workflowConfig.PlcIpAddress, workflowConfig.RecipeAddress, order.Modelo, order.Mano, order.Posicion);
+
+            await _stateMachine.TriggerAsync(StationTrigger.RecipeLoaded, immediateRecipe, ct);
+            await _stateMachine.TriggerAsync(StationTrigger.RecipeSent, null, ct);
+
+            var s7WriteResult = await _plcManager.WriteS7DirectAsync(
+                workflowConfig.PlcIpAddress,
+                workflowConfig.RecipeAddress,
+                recipeInt,
+                workflowConfig.PlcRack,
+                workflowConfig.PlcSlot,
+                ct);
+
+            if (!s7WriteResult.Success)
+            {
+                _logger.LogWarning("Siemens S7 write recipe warning ({Err}). Registrado en buffer interno.", s7WriteResult.Message);
+            }
+
+            activeCycle.Recipe_A = recipeInt;
+            activeCycle.PLCStartState = "RECIPE_SENT_S7";
+            _stateMachine.AttachActiveCycle(activeCycle);
+            await _traceability.UpdateCycleStateAsync(cycleId, c =>
+            {
+                c.Recipe_A = recipeInt;
+                c.PLCStartState = "RECIPE_SENT_S7";
+            }, ct);
+            await _stateMachine.TriggerAsync(StationTrigger.RecipeEchoVerified, null, ct);
+        }
+
+        // ---------------------------------------------------------------------
+        // CONTROL DE CUNA
+        // Si sendRecipeImmediately es true, este es el Paso 3. Si es false, es el Paso 2.
         // ---------------------------------------------------------------------
         await _stateMachine.TriggerAsync(StationTrigger.CradleCheckStarted, null, ct);
         var cradlePlan = await _planService.GetActivePlanForVariantAsync("CRADLE", order.Modelo, order.Mano, order.Posicion, ct);
@@ -243,7 +283,6 @@ public class StationOrchestrator : BackgroundService
 
             if (cradleReport.OverallSuccess && qrMatch)
             {
-                // 2.a Es OK, sigo al paso 3
                 cradleApproved = true;
                 activeCycle.CradleResult = "OK";
                 activeCycle.ErrorCode = null;
@@ -257,18 +296,17 @@ public class StationOrchestrator : BackgroundService
                     await _traceability.LogInspectionResultsAsync(cycleId, cradleReport.Details, ct);
                 }
                 await _stateMachine.TriggerAsync(StationTrigger.CradlePassed, null, ct);
-                _logger.LogInformation("STEP 2.a [CRADLE OK]: Cradle verified for sequence {Seq}. Proceeding to Step 3.", order.Secuencia);
+                _logger.LogInformation("STEP [CRADLE OK]: Cuna verificada para secuencia {Seq}. Avanzando...", order.Secuencia);
                 break;
             }
             else
             {
-                // 2.b Es NG, muestro error hasta que coloque la correcta
                 string failedPoints = cradleReport.FailedRequiredPoints.Count > 0
                     ? string.Join(", ", cradleReport.FailedRequiredPoints)
                     : (qrMatch ? "Geometría/Insertos de cuna no coinciden" : $"QR de Cuna '{activeCradleCode}' no compatible");
 
                 string errorMsg = $"CUNA NG: Coloque la cuna correcta para {order.Modelo}/{order.Mano}/{order.Posicion} (Falló: {failedPoints})";
-                _logger.LogWarning("STEP 2.b [CRADLE NG]: {Msg}. Retrying...", errorMsg);
+                _logger.LogWarning("STEP [CRADLE NG]: {Msg}. Retrying...", errorMsg);
 
                 activeCycle.CradleResult = "NOK";
                 activeCycle.ErrorCode = "ERR_CRADLE_NG_RETRY";
@@ -293,40 +331,42 @@ public class StationOrchestrator : BackgroundService
         }
 
         // ---------------------------------------------------------------------
-        // PASO 3: PASO LA RECETA AL PLC (NÚMERO ENTERO DICIÉNDOLE QUÉ DEBE HACER)
+        // PASO RECETA TRAS CUNA (SI SE CONFIGURÓ "AFTER_CRADLE_OK")
         // ---------------------------------------------------------------------
-        var recipe = await _recipeService.GetRecipeAsync(_stationCode, activeCradleCode, order.Modelo, order.Mano, order.Posicion, ct);
-        short recipeInt = (short)(recipe?.Recipe_A ?? 1);
-
-        _logger.LogInformation("STEP 3 [PLC RECIPE]: Sending recipe integer {Recipe} to Siemens PLC at {Ip}:{Addr}",
-            recipeInt, workflowConfig.PlcIpAddress, workflowConfig.RecipeAddress);
-
-        await _stateMachine.TriggerAsync(StationTrigger.RecipeLoaded, recipe, ct);
-        await _stateMachine.TriggerAsync(StationTrigger.RecipeSent, null, ct);
-
-        // Envío directo a Siemens S7-1500 (DB48.DBW2)
-        var s7WriteResult = await _plcManager.WriteS7DirectAsync(
-            workflowConfig.PlcIpAddress,
-            workflowConfig.RecipeAddress,
-            recipeInt,
-            workflowConfig.PlcRack,
-            workflowConfig.PlcSlot,
-            ct);
-
-        if (!s7WriteResult.Success)
+        if (!sendRecipeImmediately)
         {
-            _logger.LogWarning("Siemens S7 write recipe warning ({Err}). Registered with internal buffer.", s7WriteResult.Message);
+            var recipe = await _recipeService.GetRecipeAsync(_stationCode, activeCradleCode, order.Modelo, order.Mano, order.Posicion, ct);
+            short recipeInt = (short)(recipe?.Recipe_A ?? 1);
+
+            _logger.LogInformation("STEP 3 [PLC RECIPE]: Transmitiendo receta entera {Recipe} al PLC Siemens tras Cuna OK ({Ip}:{Addr})",
+                recipeInt, workflowConfig.PlcIpAddress, workflowConfig.RecipeAddress);
+
+            await _stateMachine.TriggerAsync(StationTrigger.RecipeLoaded, recipe, ct);
+            await _stateMachine.TriggerAsync(StationTrigger.RecipeSent, null, ct);
+
+            var s7WriteResult = await _plcManager.WriteS7DirectAsync(
+                workflowConfig.PlcIpAddress,
+                workflowConfig.RecipeAddress,
+                recipeInt,
+                workflowConfig.PlcRack,
+                workflowConfig.PlcSlot,
+                ct);
+
+            if (!s7WriteResult.Success)
+            {
+                _logger.LogWarning("Siemens S7 write recipe warning ({Err}). Registrado en buffer interno.", s7WriteResult.Message);
+            }
+
+            activeCycle.Recipe_A = recipeInt;
+            activeCycle.PLCStartState = "RECIPE_SENT_S7";
+            _stateMachine.AttachActiveCycle(activeCycle);
+            await _traceability.UpdateCycleStateAsync(cycleId, c =>
+            {
+                c.Recipe_A = recipeInt;
+                c.PLCStartState = "RECIPE_SENT_S7";
+            }, ct);
+            await _stateMachine.TriggerAsync(StationTrigger.RecipeEchoVerified, null, ct);
         }
-
-        activeCycle.Recipe_A = recipeInt;
-        activeCycle.PLCStartState = "RECIPE_SENT_S7";
-        _stateMachine.AttachActiveCycle(activeCycle);
-        await _traceability.UpdateCycleStateAsync(cycleId, c =>
-        {
-            c.Recipe_A = recipeInt;
-            c.PLCStartState = "RECIPE_SENT_S7";
-        }, ct);
-        await _stateMachine.TriggerAsync(StationTrigger.RecipeEchoVerified, null, ct);
 
         // ---------------------------------------------------------------------
         // PASO 4: CONTROLO PANEL
