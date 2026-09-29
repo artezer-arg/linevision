@@ -230,7 +230,7 @@ public class TraceabilityService : ITraceabilityService
     public async Task RecordBypassAsync(BypassRecord bypass, CancellationToken ct = default)
     {
         const string sql = @"
-            INSERT INTO BypassLog (User, Timestamp, PriorState, TargetState, Reason, Piece, Sequence, Cycle_ID)
+            INSERT INTO BypassLog ([User], Timestamp, PriorState, TargetState, Reason, Piece, Sequence, Cycle_ID)
             VALUES (@User, @Timestamp, @PriorState, @TargetState, @Reason, @Piece, @Sequence, @Cycle_ID)";
 
         await _db.ExecuteAsync(sql, new

@@ -605,6 +605,110 @@ public class PLCManager : IPLCService
     public int ReadSimulatorOffset6() => _simulator.ReadOffset6();
     public void SetSimulatorOffset6(int val) => _simulator.SetOffset6(val);
 
+    private PLCLiveTelemetry _lastTelemetry = new PLCLiveTelemetry();
+
+    public async Task<PLCLiveTelemetry> GetLiveTelemetryAsync(CancellationToken ct = default)
+    {
+        var sw = Stopwatch.StartNew();
+        var telem = new PLCLiveTelemetry
+        {
+            Protocol = _config.Protocol,
+            IPAddress = _config.IPAddress,
+            Port = _config.Port,
+            Offset6_Address = "DB48.DBW6",
+            Offset2_Address = "DB48.DBW2",
+            Offset4_Address = "DB48.DBX4.0",
+            LastReadTimestamp = DateTime.UtcNow
+        };
+
+        if (string.Equals(_config.Protocol, "SIMULATOR", StringComparison.OrdinalIgnoreCase))
+        {
+            telem.IsConnected = true;
+            telem.Offset6_Value = _simulator.ReadOffset6();
+            telem.Offset2_Recipe = _simulator.EchoRecipeA > 0 ? _simulator.EchoRecipeA : 19;
+            telem.Offset4_Confirmation = true;
+        }
+        else
+        {
+            try
+            {
+                using var plc = new S7.Net.Plc(S7.Net.CpuType.S71500, _config.IPAddress, 0, 1);
+                using var cts = new CancellationTokenSource(1200);
+                await plc.OpenAsync(cts.Token);
+
+                if (plc.IsConnected)
+                {
+                    _isPhysicalConnected = true;
+                    telem.IsConnected = true;
+
+                    // Leer DB48.DBW6 (offset 6)
+                    try
+                    {
+                        var raw6 = await plc.ReadAsync("DB48.DBW6");
+                        telem.Offset6_Value = Convert.ToInt32(raw6);
+                    }
+                    catch
+                    {
+                        var b6 = await plc.ReadBytesAsync(S7.Net.DataType.DataBlock, 48, 6, 2);
+                        if (b6 != null && b6.Length >= 2) telem.Offset6_Value = (b6[0] << 8) | b6[1];
+                    }
+
+                    // Leer DB48.DBW2 (offset 2)
+                    try
+                    {
+                        var raw2 = await plc.ReadAsync("DB48.DBW2");
+                        telem.Offset2_Recipe = Convert.ToInt32(raw2);
+                    }
+                    catch
+                    {
+                        var b2 = await plc.ReadBytesAsync(S7.Net.DataType.DataBlock, 48, 2, 2);
+                        if (b2 != null && b2.Length >= 2) telem.Offset2_Recipe = (b2[0] << 8) | b2[1];
+                    }
+
+                    // Leer DB48.DBX4.0
+                    try
+                    {
+                        var raw4 = await plc.ReadAsync("DB48.DBX4.0");
+                        telem.Offset4_Confirmation = Convert.ToBoolean(raw4);
+                    }
+                    catch { }
+                }
+                else
+                {
+                    _isPhysicalConnected = false;
+                    telem.IsConnected = false;
+                    telem.Offset6_Value = _simulator.ReadOffset6();
+                    telem.Offset2_Recipe = _simulator.EchoRecipeA > 0 ? _simulator.EchoRecipeA : 19;
+                    telem.Offset4_Confirmation = true;
+                }
+            }
+            catch
+            {
+                _isPhysicalConnected = false;
+                telem.IsConnected = false;
+                telem.Offset6_Value = _simulator.ReadOffset6();
+                telem.Offset2_Recipe = _simulator.EchoRecipeA > 0 ? _simulator.EchoRecipeA : 19;
+                telem.Offset4_Confirmation = true;
+            }
+        }
+
+        sw.Stop();
+        telem.LatencyMs = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
+
+        telem.Offset6_Status = telem.Offset6_Value switch
+        {
+            20 => "REQ (20: Solicitando Receta)",
+            10 => "ACK (10: Receta Recibida)",
+            24 => "IDLE (24: Reposo / Liberado)",
+            0 => "STANDBY (0: Espera)",
+            _ => $"VALOR ({telem.Offset6_Value})"
+        };
+
+        telem.HandshakeStage = telem.Offset6_Value == 20 ? "REQ_ACTIVO" : (telem.Offset6_Value == 10 ? "ACK_CONFIRMADO" : "REPOSO");
+        _lastTelemetry = telem;
+        return telem;
+    }
+
     public async Task<S7ReadResult> ReadS7Offset6DirectAsync(
         string ip,
         string address = "DB48.DBW6",

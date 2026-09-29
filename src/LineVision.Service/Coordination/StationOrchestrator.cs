@@ -26,6 +26,8 @@ public class StationOrchestrator : BackgroundService
     private readonly ILogger<StationOrchestrator> _logger;
 
     private bool _autoRunEnabled = true;
+    private int? _lastProcessedPointerId = null;
+    private CancellationTokenSource? _stepCts = null;
 
     public bool IsAutoRunEnabled => _autoRunEnabled;
     public string StationCode => _stationCode;
@@ -95,21 +97,70 @@ public class StationOrchestrator : BackgroundService
         {
             try
             {
+                // 1. Verificación continua de cambio de puntero en tabla Puesto
+                int? currentDbPointer = null;
+                try
+                {
+                    currentDbPointer = await _orderService.GetStationPointerIdAsync(_stationCode, stoppingToken);
+                }
+                catch (Exception pEx)
+                {
+                    _logger.LogWarning("Error al consultar puntero en tabla Puesto: {Message}", pEx.Message);
+                }
+
+                if (currentDbPointer.HasValue && currentDbPointer.Value > 0)
+                {
+                    if (_lastProcessedPointerId.HasValue && currentDbPointer.Value != _lastProcessedPointerId.Value)
+                    {
+                        _logger.LogInformation("==========================================================================================");
+                        _logger.LogInformation(">>> AUTO-RESET DETECTADO: Puntero en tabla Puesto cambió de {OldPtr} a {NewPtr} <<<", 
+                            _lastProcessedPointerId.Value, currentDbPointer.Value);
+                        _logger.LogInformation(">>> Cancelando ciclo anterior y cargando automáticamente nueva orden #{NewPtr}... <<<", 
+                            currentDbPointer.Value);
+                        _logger.LogInformation("==========================================================================================");
+
+                        try
+                        {
+                            _stepCts?.Cancel();
+                        }
+                        catch { }
+
+                        await _stateMachine.ResetFaultAsync("AUTO_RESET_NEW_POINTER");
+                        await _stateMachine.ForceStateAsync(StationState.WAITING_ORDER, $"Nuevo puntero en Puesto: {currentDbPointer.Value}", "AUTO_RESET");
+
+                        _lastProcessedPointerId = currentDbPointer.Value;
+
+                        if (_autoRunEnabled)
+                        {
+                            _stepCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                            await ProcessOrderStepAsync(_stepCts.Token);
+                        }
+
+                        await Task.Delay(300, stoppingToken);
+                        continue;
+                    }
+                    else if (!_lastProcessedPointerId.HasValue)
+                    {
+                        _lastProcessedPointerId = currentDbPointer.Value;
+                    }
+                }
+
                 if (!_autoRunEnabled)
                 {
-                    await Task.Delay(500, stoppingToken);
+                    await Task.Delay(400, stoppingToken);
                     continue;
                 }
 
                 if (_stateMachine.CurrentState == StationState.ERROR || _stateMachine.CurrentState == StationState.MAINTENANCE)
                 {
-                    await Task.Delay(500, stoppingToken);
+                    await Task.Delay(400, stoppingToken);
                     continue;
                 }
 
                 if (_stateMachine.CurrentState == StationState.WAITING_ORDER || _stateMachine.CurrentState == StationState.ORDER_LOADED || _stateMachine.CurrentState == StationState.CYCLE_COMPLETE)
                 {
-                    await ProcessOrderStepAsync(stoppingToken);
+                    _stepCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    await ProcessOrderStepAsync(_stepCts.Token);
                 }
 
                 await Task.Delay(200, stoppingToken);
@@ -152,6 +203,8 @@ public class StationOrchestrator : BackgroundService
         {
             return false;
         }
+
+        _lastProcessedPointerId = order.ID_OrdenProduccion;
 
         // Validación de idempotencia: si la secuencia ya fue registrada, no reprocesar a ciegas
         bool alreadyDone = false;
@@ -316,6 +369,14 @@ public class StationOrchestrator : BackgroundService
 
         while (!cradleApproved && !ct.IsCancellationRequested && _autoRunEnabled)
         {
+            int? latestPtr = await _orderService.GetStationPointerIdAsync(_stationCode, ct);
+            if (latestPtr.HasValue && latestPtr.Value > 0 && latestPtr.Value != order.ID_OrdenProduccion)
+            {
+                _logger.LogInformation("Puntero de tabla Puesto cambió a #{NewPtr} (orden actual #{Old}). Abortando inspección de cuna...", 
+                    latestPtr.Value, order.ID_OrdenProduccion);
+                return false;
+            }
+
             if (_stateMachine.CurrentState == StationState.ERROR || _stateMachine.CurrentState == StationState.MAINTENANCE)
             {
                 return false;
@@ -469,6 +530,14 @@ public class StationOrchestrator : BackgroundService
 
         while (!panelApproved && !ct.IsCancellationRequested && _autoRunEnabled)
         {
+            int? latestPtr = await _orderService.GetStationPointerIdAsync(_stationCode, ct);
+            if (latestPtr.HasValue && latestPtr.Value > 0 && latestPtr.Value != order.ID_OrdenProduccion)
+            {
+                _logger.LogInformation("Puntero de tabla Puesto cambió a #{NewPtr} (orden actual #{Old}). Abortando inspección de panel...", 
+                    latestPtr.Value, order.ID_OrdenProduccion);
+                return false;
+            }
+
             if (_stateMachine.CurrentState == StationState.ERROR || _stateMachine.CurrentState == StationState.MAINTENANCE)
             {
                 return false;

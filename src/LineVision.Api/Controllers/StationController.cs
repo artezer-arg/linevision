@@ -15,6 +15,7 @@ public class StationController : ControllerBase
     private readonly IHealthMonitoringService _healthService;
     private readonly IProductionOrderService _orderService;
     private readonly IWorkflowConfigService _workflowConfigService;
+    private readonly LineVision.Infrastructure.PLC.PLCManager _plcManager;
     private readonly ILogger<StationController> _logger;
 
     public StationController(
@@ -23,6 +24,7 @@ public class StationController : ControllerBase
         IHealthMonitoringService healthService,
         IProductionOrderService orderService,
         IWorkflowConfigService workflowConfigService,
+        LineVision.Infrastructure.PLC.PLCManager plcManager,
         ILogger<StationController> logger)
     {
         _stateMachine = stateMachine;
@@ -30,6 +32,7 @@ public class StationController : ControllerBase
         _healthService = healthService;
         _orderService = orderService;
         _workflowConfigService = workflowConfigService;
+        _plcManager = plcManager;
         _logger = logger;
     }
 
@@ -37,6 +40,7 @@ public class StationController : ControllerBase
     public async Task<IActionResult> GetStationState()
     {
         var health = await _healthService.CheckHealthAsync();
+        var plcLive = await _plcManager.GetLiveTelemetryAsync();
         return Ok(new
         {
             Station = _orchestrator.StationCode,
@@ -44,7 +48,8 @@ public class StationController : ControllerBase
             Order = _stateMachine.CurrentOrder,
             Cycle = _stateMachine.CurrentCycle,
             IsAutoRunEnabled = _orchestrator.IsAutoRunEnabled,
-            Health = health
+            Health = health,
+            PlcLive = plcLive
         });
     }
 

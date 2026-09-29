@@ -301,3 +301,21 @@ public class StationWorkflowConfig
     public bool RequireCradleQrMatch { get; set; } = false;
 }
 
+public class PLCLiveTelemetry
+{
+    public bool IsConnected { get; set; }
+    public string Protocol { get; set; } = "SIEMENS_S7";
+    public string IPAddress { get; set; } = "192.168.1.50";
+    public int Port { get; set; } = 102;
+    public int Offset6_Value { get; set; } = 20;
+    public string Offset6_Address { get; set; } = "DB48.DBW6";
+    public string Offset6_Status { get; set; } = "REQ (20)";
+    public int Offset2_Recipe { get; set; } = 19;
+    public string Offset2_Address { get; set; } = "DB48.DBW2";
+    public bool Offset4_Confirmation { get; set; } = true;
+    public string Offset4_Address { get; set; } = "DB48.DBX4.0";
+    public string HandshakeStage { get; set; } = "IDLE";
+    public double LatencyMs { get; set; } = 0;
+    public DateTime LastReadTimestamp { get; set; } = DateTime.UtcNow;
+}
+

@@ -48,6 +48,7 @@ public interface ICameraManager
 
 public interface IProductionOrderService
 {
+    Task<int?> GetStationPointerIdAsync(string stationCode, CancellationToken ct = default);
     Task<ProductionOrder?> GetCurrentOrderForStationAsync(string stationCode, CancellationToken ct = default);
     Task<bool> AdvanceStationPointerAsync(string stationCode, int nextOrderId, CancellationToken ct = default);
     Task<IReadOnlyList<ProductionOrder>> GetPendingOrdersAsync(int limit = 10, CancellationToken ct = default);

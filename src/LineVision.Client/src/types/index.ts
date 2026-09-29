@@ -53,6 +53,7 @@ export interface ProductionCycle {
   inspectionPlanVersion?: number;
   recipe_A?: number;
   recipe_B?: number;
+  plcStartState?: string;
   robotResult?: string;
   stationResult?: string;
   usuario: string;
@@ -80,6 +81,23 @@ export interface StationHealthStatus {
   memoryUsageMb: number;
   activeAlarms: IndustrialAlarm[];
   timestamp: string;
+}
+
+export interface PLCLiveTelemetry {
+  isConnected: boolean;
+  protocol: string;
+  ipAddress: string;
+  port: number;
+  offset6_Value: number;
+  offset6_Address: string;
+  offset6_Status: string;
+  offset2_Recipe: number;
+  offset2_Address: string;
+  offset4_Confirmation: boolean;
+  offset4_Address: string;
+  handshakeStage: string;
+  latencyMs: number;
+  lastReadTimestamp: string;
 }
 
 export interface InspectionROI {

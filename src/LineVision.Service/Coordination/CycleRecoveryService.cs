@@ -103,11 +103,11 @@ public class CycleRecoveryService
         await _traceability.UpdateCycleStateAsync(unfinishedCycle.Cycle_ID, c =>
         {
             c.FechaFin = DateTime.UtcNow;
-            c.StationResult = "ABORTED_ON_RESTART";
+            c.StationResult = "ABORTED";
             c.ErrorCode = "ERR_RESTART_BEFORE_COMPLETION";
         }, ct);
 
-        _logger.LogInformation("Recovery completed: Orphan cycle marked ABORTED_ON_RESTART. Ready for inspection.");
+        _logger.LogInformation("Recovery completed: Orphan cycle marked ABORTED. Ready for inspection.");
         result.ActionTaken = "ABORTED_AND_READY";
         result.RequiresOperatorIntervention = false;
         return result;

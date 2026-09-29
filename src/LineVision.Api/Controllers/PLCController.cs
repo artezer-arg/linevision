@@ -171,6 +171,13 @@ public class PLCController : ControllerBase
         return StatusCode(500, result);
     }
 
+    [HttpGet("live")]
+    public async Task<IActionResult> GetLiveTelemetry()
+    {
+        var result = await _plcManager.GetLiveTelemetryAsync();
+        return Ok(result);
+    }
+
     [HttpGet("read-offset6")]
     public async Task<IActionResult> ReadOffset6([FromQuery] string? ip, [FromQuery] string? address, [FromQuery] int? rack, [FromQuery] int? slot)
     {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ProductionOrder, ProductionCycle, StationHealthStatus, StationState, UserSession, StationWorkflowConfig } from './types';
+import { ProductionOrder, ProductionCycle, StationHealthStatus, StationState, UserSession, StationWorkflowConfig, PLCLiveTelemetry } from './types';
 import { SignalRService, api } from './services/api';
 import { OperatorHeader } from './components/OperatorHeader';
 import { StateFlowBar } from './components/StateFlowBar';
@@ -21,6 +21,7 @@ export const App: React.FC = () => {
   const [workflowConfig, setWorkflowConfig] = useState<StationWorkflowConfig | null>(null);
   const [frames, setFrames] = useState<Record<string, string>>({});
   const [health, setHealth] = useState<StationHealthStatus | null>(null);
+  const [plcLive, setPlcLive] = useState<PLCLiveTelemetry | null>(null);
   const [autoRun, setAutoRun] = useState(true);
   const [activeTab, setActiveTab] = useState<'OPERATOR' | 'CALIBRATION' | 'CAMERAS' | 'PLC_COMM' | 'DATABASE' | 'TECHNICAL' | 'SIMULATORS' | 'MAINTENANCE' | 'HISTORY'>('OPERATOR');
   const [currentTime, setCurrentTime] = useState<string>('');
@@ -54,22 +55,31 @@ export const App: React.FC = () => {
       (hlt) => setHealth(hlt)
     );
 
-    // Initial load via REST
-    api.getStationState().then(data => {
-      if (data) {
-        setStationState(data.state);
-        setOrder(data.order);
-        setCycle(data.cycle);
-        setAutoRun(data.isAutoRunEnabled);
-        setHealth(data.health);
-      }
-    }).catch(console.error);
+    // Initial load & continuous poll via REST to guarantee live PLC readings and DB updates
+    const pollState = () => {
+      api.getStationState().then(data => {
+        if (data) {
+          setStationState(data.state);
+          setOrder(data.order);
+          setCycle(data.cycle);
+          setAutoRun(data.isAutoRunEnabled);
+          setHealth(data.health);
+          if (data.plcLive) setPlcLive(data.plcLive);
+        }
+      }).catch(console.error);
+    };
+
+    pollState();
+    const pollInterval = setInterval(pollState, 1200);
 
     api.getWorkflowConfig().then(cfg => {
       if (cfg) setWorkflowConfig(cfg);
     }).catch(console.error);
 
-    return () => signalR.stop();
+    return () => {
+      clearInterval(pollInterval);
+      signalR.stop();
+    };
   }, []);
 
   const handleToggleAutoRun = async () => {
@@ -290,6 +300,7 @@ export const App: React.FC = () => {
             workflowConfig={workflowConfig}
             frames={frames}
             health={health}
+            plcLive={plcLive}
             autoRun={autoRun}
             onToggleAutoRun={handleToggleAutoRun}
             onTriggerStep={handleTriggerStep}

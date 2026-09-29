@@ -36,60 +36,82 @@ public class ProductionOrderService : IProductionOrderService
             ?? "SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion FROM OrdenProduccion ORDER BY Orden ASC LIMIT @limit";
     }
 
-    public async Task<ProductionOrder?> GetCurrentOrderForStationAsync(string stationCode, CancellationToken ct = default)
+    public async Task<int?> GetStationPointerIdAsync(string stationCode, CancellationToken ct = default)
     {
         try
         {
-            // 1. Obtener el puntero_id_ordenproduccion de la tabla puesto donde puesto es DL01
             var pointerId = await _db.QuerySingleOrDefaultAsync<int?>(_sqlGetPointer, new { stationCode }, ct);
             if (!pointerId.HasValue || pointerId.Value <= 0)
             {
-                // Fallback explícito: buscar directamente en Puesto WHERE UPPER(Puesto) = 'DL01'
                 try
                 {
                     pointerId = await _db.QuerySingleOrDefaultAsync<int?>(
-                        "SELECT Puntero_ID_OrdenProduccion FROM Puesto WHERE UPPER(Puesto) = 'DL01'", ct: ct);
+                        "SELECT Puntero_ID_OrdenProduccion FROM Puesto WHERE UPPER(Puesto) = 'DL01' LIMIT 1", ct: ct);
                 }
                 catch { }
 
-                // Fallback de contingencia si DL01 no existe en la base de datos local: buscar por stationCode
                 if (!pointerId.HasValue || pointerId.Value <= 0)
                 {
                     try
                     {
                         pointerId = await _db.QuerySingleOrDefaultAsync<int?>(
-                            "SELECT Puntero_ID_OrdenProduccion FROM Puesto WHERE UPPER(Puesto) = UPPER(@stationCode)", 
+                            "SELECT Puntero_ID_OrdenProduccion FROM Puesto WHERE UPPER(Puesto) = UPPER(@stationCode) LIMIT 1", 
                             new { stationCode }, ct);
                     }
                     catch { }
                 }
             }
+            return pointerId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Error leyendo puntero_id_ordenproduccion en tabla Puesto: {Message}", ex.Message);
+            return null;
+        }
+    }
 
+    public async Task<ProductionOrder?> GetCurrentOrderForStationAsync(string stationCode, CancellationToken ct = default)
+    {
+        try
+        {
+            // 1. Obtener el puntero_id_ordenproduccion de la tabla puesto donde puesto es DL01
+            var pointerId = await GetStationPointerIdAsync(stationCode, ct);
             int currentPointer = pointerId.GetValueOrDefault(18);
             if (currentPointer <= 0) currentPointer = 18;
+
+            bool isSql = _db.CurrentProvider.Equals("SqlServer", StringComparison.OrdinalIgnoreCase);
 
             // 2. Buscar la orden asociada al puntero obtenido:
             // El puntero de Puesto (puntero_id_ordenproduccion) apunta al ID_OrdenProduccion
             var order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(_sqlGetOrder, new { orderId = currentPointer }, ct);
             if (order == null)
             {
-                order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(
-                    @"SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion 
-                      FROM OrdenProduccion 
-                      WHERE ID_OrdenProduccion = @orderId OR ID_Secuencia = @orderId OR Secuencia = CAST(@orderId AS VARCHAR(20))
-                      ORDER BY ID_OrdenProduccion ASC LIMIT 1",
-                    new { orderId = currentPointer }, ct);
+                string sqlExact = isSql
+                    ? @"SELECT TOP 1 ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion 
+                        FROM OrdenProduccion 
+                        WHERE ID_OrdenProduccion = @orderId OR ID_Secuencia = @orderId OR Secuencia = CAST(@orderId AS VARCHAR(20))
+                        ORDER BY ID_OrdenProduccion ASC"
+                    : @"SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion 
+                        FROM OrdenProduccion 
+                        WHERE ID_OrdenProduccion = @orderId OR ID_Secuencia = @orderId OR Secuencia = CAST(@orderId AS VARCHAR(20))
+                        ORDER BY ID_OrdenProduccion ASC LIMIT 1";
+
+                order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(sqlExact, new { orderId = currentPointer }, ct);
             }
 
             if (order == null)
             {
                 // 3. Buscar siguiente orden existente >= pointer en OrdenProduccion
-                const string sqlFindNext = @"
-                    SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion 
-                    FROM OrdenProduccion 
-                    WHERE ID_OrdenProduccion >= @orderId OR ID_Secuencia >= @orderId
-                    ORDER BY ID_OrdenProduccion ASC 
-                    LIMIT 1";
+                string sqlFindNext = isSql
+                    ? @"SELECT TOP 1 ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion 
+                        FROM OrdenProduccion 
+                        WHERE ID_OrdenProduccion >= @orderId OR ID_Secuencia >= @orderId
+                        ORDER BY ID_OrdenProduccion ASC"
+                    : @"SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion 
+                        FROM OrdenProduccion 
+                        WHERE ID_OrdenProduccion >= @orderId OR ID_Secuencia >= @orderId
+                        ORDER BY ID_OrdenProduccion ASC LIMIT 1";
+
                 order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(sqlFindNext, new { orderId = currentPointer }, ct);
 
                 // 4. Si no se encuentra en OrdenProduccion, buscar en la tabla nativa de planta Orden_Produccion
@@ -97,22 +119,36 @@ public class ProductionOrderService : IProductionOrderService
                 {
                     try
                     {
-                        const string sqlPlant = @"
-                            SELECT 
-                                ID_OrdenProduccion, 
-                                CAST(ID_OrdenCliente AS VARCHAR(50)) as ID_OrdenCliente, 
-                                Secuencia as ID_Secuencia, 
-                                RIGHT('0000' + CAST(Secuencia AS VARCHAR(10)), 4) as Secuencia, 
-                                SD as Modelo, 
-                                Mano, 
-                                CASE WHEN Posicion = 'FR' THEN 'FRONT' WHEN Posicion = 'RR' THEN 'REAR' ELSE Posicion END as Posicion, 
-                                Orden, 
-                                'PENDIENTE' as Estado, 
-                                ISNULL(Fecha_Secuencia, GETDATE()) as FechaCreacion
-                            FROM Orden_Produccion
-                            WHERE ID_OrdenProduccion = @orderId OR Secuencia = @orderId OR ID_OrdenProduccion >= @orderId
-                            ORDER BY ID_OrdenProduccion ASC
-                            LIMIT 1";
+                        string sqlPlant = isSql
+                            ? @"SELECT TOP 1
+                                    ID_OrdenProduccion, 
+                                    CAST(ID_OrdenCliente AS VARCHAR(50)) as ID_OrdenCliente, 
+                                    Secuencia as ID_Secuencia, 
+                                    RIGHT('0000' + CAST(Secuencia AS VARCHAR(10)), 4) as Secuencia, 
+                                    SD as Modelo, 
+                                    Mano, 
+                                    CASE WHEN Posicion = 'FR' THEN 'FRONT' WHEN Posicion = 'RR' THEN 'REAR' ELSE Posicion END as Posicion, 
+                                    Orden, 
+                                    'PENDIENTE' as Estado, 
+                                    ISNULL(Fecha_Secuencia, GETDATE()) as FechaCreacion
+                                FROM Orden_Produccion
+                                WHERE ID_OrdenProduccion = @orderId OR Secuencia = @orderId OR ID_OrdenProduccion >= @orderId
+                                ORDER BY ID_OrdenProduccion ASC"
+                            : @"SELECT 
+                                    ID_OrdenProduccion, 
+                                    CAST(ID_OrdenCliente AS VARCHAR(50)) as ID_OrdenCliente, 
+                                    Secuencia as ID_Secuencia, 
+                                    Secuencia, 
+                                    SD as Modelo, 
+                                    Mano, 
+                                    CASE WHEN Posicion = 'FR' THEN 'FRONT' WHEN Posicion = 'RR' THEN 'REAR' ELSE Posicion END as Posicion, 
+                                    Orden, 
+                                    'PENDIENTE' as Estado, 
+                                    Fecha_Secuencia as FechaCreacion
+                                FROM Orden_Produccion
+                                WHERE ID_OrdenProduccion = @orderId OR Secuencia = @orderId OR ID_OrdenProduccion >= @orderId
+                                ORDER BY ID_OrdenProduccion ASC LIMIT 1";
+
                         order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(sqlPlant, new { orderId = currentPointer }, ct);
                         if (order != null)
                         {

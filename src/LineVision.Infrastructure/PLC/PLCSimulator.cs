@@ -32,6 +32,7 @@ public class PLCSimulator : IPLCService
 
     public string PLCId => _config.PLC_ID;
     public bool IsConnected => _isConnected && !_simulateConnectionLost;
+    public int EchoRecipeA => _echoARegister > 0 ? _echoARegister : (_recipeARegister > 0 ? _recipeARegister : 19);
 
     public PLCSimulator(PLCConfiguration config, ILogger<PLCSimulator> logger)
     {
