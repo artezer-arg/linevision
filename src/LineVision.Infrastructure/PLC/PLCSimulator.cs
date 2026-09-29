@@ -19,7 +19,7 @@ public class PLCSimulator : IPLCService
     private int _recipeBRegister = 0;
     private int _echoARegister = 0;
     private int _echoBRegister = 0;
-    private int _handshakeOffset6 = 20; // 20 = Request Recipe, 10 = Recipe Ack
+    private int _handshakeOffset6 = 10; // 10 = Idle / Espera de solicitud (pasa a 20 cuando el PLC solicita receta)
 
     // Fault Injection Flags
     private bool _simulateTimeout = false;
@@ -222,8 +222,8 @@ public class PLCSimulator : IPLCService
         _recipeReadyBit = false;
         _recipeReceivedBit = false;
         _rawState = 0; // FREE
-        _handshakeOffset6 = 20; // Reset ready for next cycle
-        _logger.LogInformation("PLC SIMULATOR: Signals cleared, state reset to FREE, Handshake Offset 6 reset to 20");
+        _handshakeOffset6 = 10; // Reposo
+        _logger.LogInformation("PLC SIMULATOR: Signals cleared, state reset to FREE, Handshake Offset 6 reset to 10 (Reposo)");
         return Task.FromResult(true);
     }
 

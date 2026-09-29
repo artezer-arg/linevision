@@ -625,7 +625,7 @@ public class PLCManager : IPLCService
         {
             telem.IsConnected = true;
             telem.Offset6_Value = _simulator.ReadOffset6();
-            telem.Offset2_Recipe = _simulator.EchoRecipeA > 0 ? _simulator.EchoRecipeA : 19;
+            telem.Offset2_Recipe = _simulator.EchoRecipeA > 0 ? _simulator.EchoRecipeA : 24;
             telem.Offset4_Confirmation = true;
         }
         else
@@ -678,7 +678,7 @@ public class PLCManager : IPLCService
                     _isPhysicalConnected = false;
                     telem.IsConnected = false;
                     telem.Offset6_Value = _simulator.ReadOffset6();
-                    telem.Offset2_Recipe = _simulator.EchoRecipeA > 0 ? _simulator.EchoRecipeA : 19;
+                    telem.Offset2_Recipe = _simulator.EchoRecipeA > 0 ? _simulator.EchoRecipeA : 24;
                     telem.Offset4_Confirmation = true;
                 }
             }
@@ -687,7 +687,7 @@ public class PLCManager : IPLCService
                 _isPhysicalConnected = false;
                 telem.IsConnected = false;
                 telem.Offset6_Value = _simulator.ReadOffset6();
-                telem.Offset2_Recipe = _simulator.EchoRecipeA > 0 ? _simulator.EchoRecipeA : 19;
+                telem.Offset2_Recipe = _simulator.EchoRecipeA > 0 ? _simulator.EchoRecipeA : 24;
                 telem.Offset4_Confirmation = true;
             }
         }
@@ -861,41 +861,99 @@ public class PLCManager : IPLCService
                 }
             }
 
-            // 1. ESPERAR A QUE EL PLC SOLICITE RECETA (Offset 6 == reqValue [20])
-            statusCallback?.Invoke($"Paso 2.1: Monitoreando {cleanHandshakeAddr}. Esperando solicitud del PLC (Valor = {reqValue})...");
+            // =========================================================================
+            // PASO 1: ENVIAR 24 (REPOSO) EN DBW2 HASTA DETECTAR reqValue (20) EN OFFSET 6
+            // =========================================================================
+            _logger.LogInformation("PLC HANDSHAKE PASO 1: Transmitiendo valor de reposo inicial {Idle} a {RecAddr} y monitoreando {HsAddr} (Esperando solicitud {Req})...",
+                idleValue, cleanRecipeAddr, cleanHandshakeAddr, reqValue);
+
+            // Escribir de inmediato el valor de reposo (24) en DB48.DBW2
+            await plc.WriteAsync(cleanRecipeAddr, idleValue);
+
             int currentVal = await ReadHandshakeRawAsync();
+            statusCallback?.Invoke($"Paso 2.1: Reposo {idleValue} activo en {cleanRecipeAddr}. PLC {cleanHandshakeAddr}={currentVal}. Esperando solicitud {reqValue}...");
 
             var reqSw = Stopwatch.StartNew();
-            while (currentVal != reqValue && !ct.IsCancellationRequested && reqSw.ElapsedMilliseconds < maxPollTimeoutMs)
+            int idleWriteTick = 0;
+
+            while (currentVal != reqValue && !ct.IsCancellationRequested)
             {
-                statusCallback?.Invoke($"PLC {cleanHandshakeAddr}={currentVal}. Esperando {reqValue} para enviar receta {sequenceRecipe}...");
+                if (maxPollTimeoutMs > 0 && reqSw.ElapsedMilliseconds >= maxPollTimeoutMs)
+                {
+                    // Si venció el tiempo de espera, NUNCA enviar la receta. Mantener 24 y abortar con error.
+                    await plc.WriteAsync(cleanRecipeAddr, idleValue);
+                    sw.Stop();
+                    string timeoutMsg = $"Timeout ({maxPollTimeoutMs}ms) esperando solicitud ({reqValue}) del PLC en {cleanHandshakeAddr}. Valor actual: {currentVal}. Se mantuvo reposo {idleValue} en {cleanRecipeAddr} (NO se transmitió receta).";
+                    _logger.LogWarning("{Msg}", timeoutMsg);
+                    statusCallback?.Invoke(timeoutMsg);
+                    return new S7HandshakeResult
+                    {
+                        Success = false,
+                        IPAddress = ip,
+                        HandshakeAddress = cleanHandshakeAddr,
+                        RecipeAddress = cleanRecipeAddr,
+                        SequenceRecipeSent = sequenceRecipe,
+                        HandshakeReqDetected = currentVal,
+                        HandshakeAckReceived = 0,
+                        IdleValueSent = idleValue,
+                        DurationMs = (int)sw.ElapsedMilliseconds,
+                        Message = timeoutMsg
+                    };
+                }
+
+                // Reforzar valor 24 en DBW2 periódicamente cada ~500ms
+                if (++idleWriteTick % 5 == 0)
+                {
+                    await plc.WriteAsync(cleanRecipeAddr, idleValue);
+                }
+
+                statusCallback?.Invoke($"PLC {cleanHandshakeAddr}={currentVal}. Manteniendo {idleValue} en {cleanRecipeAddr}. Esperando {reqValue} para enviar receta {sequenceRecipe}...");
                 await Task.Delay(100, ct);
                 currentVal = await ReadHandshakeRawAsync();
             }
 
-            int reqDetected = currentVal;
-            _logger.LogInformation("PLC HANDSHAKE: Solicitud detectada ({Val}) en {Addr}. Procediendo a transmitir receta {Recipe}",
-                currentVal, cleanHandshakeAddr, sequenceRecipe);
+            if (ct.IsCancellationRequested)
+            {
+                await plc.WriteAsync(cleanRecipeAddr, idleValue);
+                return new S7HandshakeResult
+                {
+                    Success = false,
+                    Message = "Handshake cancelado por interrupción del ciclo. Se mantuvo reposo 24."
+                };
+            }
 
-            // 2. TRANSMITIR RECETA DE SECUENCIA (15) CONTINUAMENTE HASTA DETECTAR ackValue (10)
-            statusCallback?.Invoke($"Paso 2.2: Solicitud {reqValue} detectada. Transmitiendo receta {sequenceRecipe} a {cleanRecipeAddr}...");
+            // =========================================================================
+            // PASO 2: SOLICITUD 20 DETECTADA. TRANSMITIR RECETA DE SECUENCIA (EJ. 15) HASTA DETECTAR 10
+            // =========================================================================
+            int reqDetected = currentVal; // Garantizado == reqValue (20)
+            _logger.LogInformation("PLC HANDSHAKE PASO 2: Solicitud {Req} confirmada en {HsAddr}. Transmitiendo receta {Recipe} a {RecAddr}...",
+                reqDetected, cleanHandshakeAddr, sequenceRecipe, cleanRecipeAddr);
+
+            statusCallback?.Invoke($"Paso 2.2: Solicitud {reqValue} detectada. Transmitiendo receta {sequenceRecipe} a {cleanRecipeAddr} hasta confirmación {ackValue}...");
             await plc.WriteAsync(cleanRecipeAddr, sequenceRecipe);
 
             var ackSw = Stopwatch.StartNew();
             currentVal = await ReadHandshakeRawAsync();
 
-            while (currentVal != ackValue && !ct.IsCancellationRequested && ackSw.ElapsedMilliseconds < maxPollTimeoutMs)
+            while (currentVal != ackValue && !ct.IsCancellationRequested)
             {
+                if (maxPollTimeoutMs > 0 && ackSw.ElapsedMilliseconds >= maxPollTimeoutMs)
+                {
+                    break;
+                }
+
                 await plc.WriteAsync(cleanRecipeAddr, sequenceRecipe);
-                statusCallback?.Invoke($"Receta {sequenceRecipe} enviada a {cleanRecipeAddr}. Esperando confirmación {cleanHandshakeAddr}=={ackValue} (Actual: {currentVal})...");
-                await Task.Delay(150, ct);
+                statusCallback?.Invoke($"Receta {sequenceRecipe} en {cleanRecipeAddr}. Esperando confirmación {cleanHandshakeAddr}=={ackValue} (Actual: {currentVal})...");
+                await Task.Delay(100, ct);
                 currentVal = await ReadHandshakeRawAsync();
             }
 
-            // 3. AL DETECTAR ackValue (10), TRANSMITIR idleValue (24)
+            // =========================================================================
+            // PASO 3: CONFIRMACIÓN 10 DETECTADA. ESCRIBIR INMEDIATAMENTE 24 DE REPOSO
+            // =========================================================================
             if (currentVal == ackValue)
             {
-                _logger.LogInformation("PLC HANDSHAKE: Confirmación detectada ({Val}) en {Addr}. Transmitiendo valor de reposo {Idle} a {RecAddr}...",
+                _logger.LogInformation("PLC HANDSHAKE PASO 3: Confirmación {Ack} detectada en {HsAddr}. Transmitiendo valor de reposo {Idle} a {RecAddr}...",
                     currentVal, cleanHandshakeAddr, idleValue, cleanRecipeAddr);
                 statusCallback?.Invoke($"Paso 2.3: PLC confirmó ({ackValue}). Escribiendo valor de reposo {idleValue} en {cleanRecipeAddr}...");
 
@@ -925,8 +983,10 @@ public class PLCManager : IPLCService
             }
             else
             {
+                // Restaurar reposo por seguridad
+                await plc.WriteAsync(cleanRecipeAddr, idleValue);
                 sw.Stop();
-                string timeoutMsg = $"Handshake incompleto: Se transmitió receta {sequenceRecipe}, pero el PLC no respondió con {ackValue} dentro del tiempo límite (Último valor leído en {cleanHandshakeAddr}: {currentVal}).";
+                string timeoutMsg = $"Handshake incompleto: Se transmitió receta {sequenceRecipe}, pero el PLC no respondió con {ackValue} (Último valor en {cleanHandshakeAddr}: {currentVal}). Se restauró reposo {idleValue}.";
                 _logger.LogWarning("{Msg}", timeoutMsg);
                 statusCallback?.Invoke(timeoutMsg);
 
@@ -964,22 +1024,33 @@ public class PLCManager : IPLCService
         CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
+
+        // 1. Iniciar con reposo 24 en DBW2
+        statusCallback?.Invoke($"[SIMULADOR] Reposo activo ({recipeAddress} = {idleValue}). Monitoreando {handshakeAddress}...");
+        await _simulator.WriteRecipeAsync(idleValue, idleValue, ct);
+
+        await Task.Delay(200, ct);
+
+        // 2. Simular solicitud del PLC (Offset 6 pasa a 20)
         statusCallback?.Invoke($"[SIMULADOR] PLC solicitando receta ({handshakeAddress} == {reqValue})...");
         _simulator.SetOffset6(reqValue);
 
-        await Task.Delay(100, ct);
+        await Task.Delay(150, ct);
 
+        // 3. Escribir receta de la secuencia
         statusCallback?.Invoke($"[SIMULADOR] Transmitiendo receta de orden {sequenceRecipe} a {recipeAddress}...");
         await _simulator.WriteRecipeAsync(sequenceRecipe, sequenceRecipe, ct);
 
-        await Task.Delay(250, ct);
+        await Task.Delay(300, ct);
+        _simulator.SetOffset6(ackValue);
         int ack = _simulator.ReadOffset6();
 
+        // 4. Confirmación detectada (10), escribir 24 de reposo
         statusCallback?.Invoke($"[SIMULADOR] Confirmación {ack} recibida. Transmitiendo reposo {idleValue} a {recipeAddress}...");
         await _simulator.WriteRecipeAsync(idleValue, idleValue, ct);
 
         sw.Stop();
-        string msg = $"[SIMULADOR] Handshake completado: Solicitud={reqValue}, Receta={sequenceRecipe}, Confirmación={ack}, Reposo={idleValue}.";
+        string msg = $"[SIMULADOR] Handshake completado: Reposo={idleValue} -> Solicitud={reqValue} -> Receta={sequenceRecipe} -> Confirmación={ack} -> Reposo final={idleValue}.";
         return new S7HandshakeResult
         {
             Success = true,

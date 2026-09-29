@@ -848,7 +848,7 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
                   </div>
 
                   <p className="text-[11px] text-slate-300 leading-relaxed">
-                    Lee <strong>{workflowConfig.handshakeAddress || 'DB48.DBW6'}</strong>: Cuando devuelve <strong>{workflowConfig.handshakeReqValue ?? 20}</strong> envía la receta de la secuencia a <strong>{workflowConfig.recipeAddress || 'DB48.DBW2'}</strong>. No deja de enviarla hasta detectar <strong>{workflowConfig.handshakeAckValue ?? 10}</strong>, momento en el cual escribe <strong>{workflowConfig.handshakeIdleValue ?? 24}</strong> de reposo hasta la próxima orden.
+                    Envía y mantiene <strong>{workflowConfig.handshakeIdleValue ?? 24}</strong> de reposo en <strong>{workflowConfig.recipeAddress || 'DB48.DBW2'}</strong> hasta recibir <strong>{workflowConfig.handshakeReqValue ?? 20}</strong> en <strong>{workflowConfig.handshakeAddress || 'DB48.DBW6'}</strong>. Al recibir <strong>{workflowConfig.handshakeReqValue ?? 20}</strong>, transmite la receta de la secuencia hasta detectar <strong>{workflowConfig.handshakeAckValue ?? 10}</strong>, momento en el cual vuelve a escribir <strong>{workflowConfig.handshakeIdleValue ?? 24}</strong> de reposo.
                   </p>
 
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-1">

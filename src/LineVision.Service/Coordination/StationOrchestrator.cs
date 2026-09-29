@@ -304,8 +304,8 @@ public class StationOrchestrator : BackgroundService
 
             if (workflowConfig.EnableRecipeHandshake)
             {
-                _logger.LogInformation("STEP 2 [PLC HANDSHAKE]: Iniciando protocolo Handshake en {HsAddr} (Espera {Req} -> Envía {Recipe} a {RecAddr} hasta {Ack} -> Envía {Idle} de reposo)",
-                    workflowConfig.HandshakeAddress, workflowConfig.HandshakeReqValue, recipeInt, workflowConfig.RecipeAddress, workflowConfig.HandshakeAckValue, workflowConfig.HandshakeIdleValue);
+                _logger.LogInformation("STEP 2 [PLC HANDSHAKE]: Iniciando protocolo Handshake en {HsAddr} (Manteniendo reposo {Idle} en {RecAddr} hasta solicitud {Req} -> Transmite receta {Recipe} hasta {Ack} -> Reposo final {Idle})",
+                    workflowConfig.HandshakeAddress, workflowConfig.HandshakeIdleValue, workflowConfig.RecipeAddress, workflowConfig.HandshakeReqValue, recipeInt, workflowConfig.HandshakeAckValue, workflowConfig.HandshakeIdleValue);
 
                 var hsResult = await _plcManager.ExecuteRecipeHandshakeAsync(
                     workflowConfig.PlcIpAddress,
@@ -317,7 +317,7 @@ public class StationOrchestrator : BackgroundService
                     workflowConfig.HandshakeIdleValue,
                     workflowConfig.PlcRack,
                     workflowConfig.PlcSlot,
-                    maxPollTimeoutMs: 15000,
+                    maxPollTimeoutMs: 0,
                     statusCallback: msg =>
                     {
                         activeCycle.PLCStartState = msg;
@@ -325,8 +325,16 @@ public class StationOrchestrator : BackgroundService
                     },
                     ct: ct);
 
+                if (!hsResult.Success)
+                {
+                    _logger.LogWarning("STEP 2 [PLC HANDSHAKE]: Handshake no completado: {Msg}", hsResult.Message);
+                    activeCycle.PLCStartState = hsResult.Message;
+                    _stateMachine.AttachActiveCycle(activeCycle);
+                    return false;
+                }
+
                 activeCycle.Recipe_A = recipeInt;
-                activeCycle.PLCStartState = hsResult.Success ? $"HANDSHAKE_OK ({workflowConfig.HandshakeAckValue}->{workflowConfig.HandshakeIdleValue})" : "HANDSHAKE_TIMEOUT";
+                activeCycle.PLCStartState = $"HANDSHAKE_OK ({workflowConfig.HandshakeAckValue}->{workflowConfig.HandshakeIdleValue})";
                 _stateMachine.AttachActiveCycle(activeCycle);
             }
             else
@@ -465,8 +473,8 @@ public class StationOrchestrator : BackgroundService
 
             if (workflowConfig.EnableRecipeHandshake)
             {
-                _logger.LogInformation("STEP 3 [PLC HANDSHAKE]: Iniciando protocolo Handshake tras Cuna OK en {HsAddr} (Espera {Req} -> Envía {Recipe} a {RecAddr} hasta {Ack} -> Envía {Idle} de reposo)",
-                    workflowConfig.HandshakeAddress, workflowConfig.HandshakeReqValue, recipeInt, workflowConfig.RecipeAddress, workflowConfig.HandshakeAckValue, workflowConfig.HandshakeIdleValue);
+                _logger.LogInformation("STEP 3 [PLC HANDSHAKE]: Iniciando protocolo Handshake tras Cuna OK en {HsAddr} (Manteniendo reposo {Idle} en {RecAddr} hasta solicitud {Req} -> Transmite receta {Recipe} hasta {Ack} -> Reposo final {Idle})",
+                    workflowConfig.HandshakeAddress, workflowConfig.HandshakeIdleValue, workflowConfig.RecipeAddress, workflowConfig.HandshakeReqValue, recipeInt, workflowConfig.HandshakeAckValue, workflowConfig.HandshakeIdleValue);
 
                 var hsResult = await _plcManager.ExecuteRecipeHandshakeAsync(
                     workflowConfig.PlcIpAddress,
@@ -478,7 +486,7 @@ public class StationOrchestrator : BackgroundService
                     workflowConfig.HandshakeIdleValue,
                     workflowConfig.PlcRack,
                     workflowConfig.PlcSlot,
-                    maxPollTimeoutMs: 15000,
+                    maxPollTimeoutMs: 0,
                     statusCallback: msg =>
                     {
                         activeCycle.PLCStartState = msg;
@@ -486,8 +494,16 @@ public class StationOrchestrator : BackgroundService
                     },
                     ct: ct);
 
+                if (!hsResult.Success)
+                {
+                    _logger.LogWarning("STEP 3 [PLC HANDSHAKE]: Handshake no completado: {Msg}", hsResult.Message);
+                    activeCycle.PLCStartState = hsResult.Message;
+                    _stateMachine.AttachActiveCycle(activeCycle);
+                    return false;
+                }
+
                 activeCycle.Recipe_A = recipeInt;
-                activeCycle.PLCStartState = hsResult.Success ? $"HANDSHAKE_OK ({workflowConfig.HandshakeAckValue}->{workflowConfig.HandshakeIdleValue})" : "HANDSHAKE_TIMEOUT";
+                activeCycle.PLCStartState = $"HANDSHAKE_OK ({workflowConfig.HandshakeAckValue}->{workflowConfig.HandshakeIdleValue})";
                 _stateMachine.AttachActiveCycle(activeCycle);
             }
             else

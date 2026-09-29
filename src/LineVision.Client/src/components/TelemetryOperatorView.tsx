@@ -560,11 +560,11 @@ export const TelemetryOperatorView: React.FC<Props> = ({
 
               <div className="h-px bg-slate-300"></div>
 
-              {/* Offset 2: Receta */}
+              {/* Offset 2: Receta / Reposo */}
               <div className="flex items-center justify-between text-[11px]">
-                <span className="text-slate-600 font-semibold">Receta en DB48.DBW2:</span>
-                <span className="font-mono font-black text-blue-700">
-                  ID: {plcLive?.offset2_Recipe || cycle?.recipe_A || 19}
+                <span className="text-slate-600 font-semibold">Valor en DB48.DBW2:</span>
+                <span className={`font-mono font-black px-1.5 py-0.5 rounded text-xs ${(plcLive?.offset2_Recipe ?? 24) === 24 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}`}>
+                  {(plcLive?.offset2_Recipe ?? 24) === 24 ? '24 (REPOSO)' : `ID: ${plcLive?.offset2_Recipe ?? cycle?.recipe_A} (RECETA)`}
                 </span>
               </div>
 
