@@ -49,177 +49,266 @@ public class CalibrationController : ControllerBase
         return Ok(plan);
     }
 
+    private static bool ToBool(object? val, bool defaultValue = false)
+    {
+        if (val == null || val is DBNull) return defaultValue;
+        if (val is bool b) return b;
+        try
+        {
+            return Convert.ToInt64(val) != 0;
+        }
+        catch
+        {
+            return defaultValue;
+        }
+    }
+
     [HttpGet("points")]
     public async Task<IActionResult> GetAllPoints()
     {
-        const string sqlPts = @"
-            SELECT p.*, r.ROI_ID as r_ROI_ID, r.Name as r_Name, r.X as r_X, r.Y as r_Y, 
-                   r.Width as r_Width, r.Height as r_Height, r.ShapeType as r_ShapeType
-            FROM InspectionPoint p
-            LEFT JOIN InspectionROI r ON p.InspectionPoint_ID = r.InspectionPoint_ID
-            ORDER BY p.PieceType, p.ExecutionOrder";
-
-        var pointsDict = new Dictionary<string, InspectionPoint>();
-        var rows = await _db.QueryAsync<dynamic>(sqlPts);
-
-        foreach (var r in rows)
+        try
         {
-            string pId = (string)r.InspectionPoint_ID;
-            if (!pointsDict.TryGetValue(pId, out var pt))
+            const string sqlPts = @"
+                SELECT p.*, r.ROI_ID as r_ROI_ID, r.Name as r_Name, r.X as r_X, r.Y as r_Y, 
+                       r.Width as r_Width, r.Height as r_Height, r.ShapeType as r_ShapeType
+                FROM InspectionPoint p
+                LEFT JOIN InspectionROI r ON p.InspectionPoint_ID = r.InspectionPoint_ID
+                ORDER BY p.PieceType, p.ExecutionOrder";
+
+            var pointsDict = new Dictionary<string, InspectionPoint>();
+            var rows = await _db.QueryAsync<dynamic>(sqlPts);
+
+            foreach (var r in rows)
             {
-                pt = new InspectionPoint
+                string pId = (string)r.InspectionPoint_ID;
+                if (!pointsDict.TryGetValue(pId, out var pt))
                 {
-                    InspectionPoint_ID = pId,
-                    Code = r.Code ?? string.Empty,
-                    Name = r.Name ?? string.Empty,
-                    Description = r.Description,
-                    PieceType = r.PieceType ?? "PANEL",
-                    CameraId = r.CameraId ?? "CAM_PANEL_01",
-                    AlgorithmType = r.AlgorithmType ?? "PRESENCE",
-                    ExpectedValue = r.ExpectedValue ?? "PRESENT",
-                    Tolerance = r.Tolerance != null ? Convert.ToDouble(r.Tolerance) : 0,
-                    MinConfidence = r.MinConfidence != null ? Convert.ToDouble(r.MinConfidence) : 0.85,
-                    IsRequired = r.IsRequired == 1,
-                    ExecutionOrder = r.ExecutionOrder != null ? Convert.ToInt32(r.ExecutionOrder) : 1,
-                    Enabled = r.Enabled == 1,
-                    ROIs = new List<InspectionROI>()
-                };
-                pointsDict[pId] = pt;
+                    pt = new InspectionPoint
+                    {
+                        InspectionPoint_ID = pId,
+                        Code = r.Code != null ? Convert.ToString(r.Code) : string.Empty,
+                        Name = r.Name != null ? Convert.ToString(r.Name) : string.Empty,
+                        Description = r.Description != null ? Convert.ToString(r.Description) : null,
+                        PieceType = r.PieceType != null ? Convert.ToString(r.PieceType) : "PANEL",
+                        CameraId = r.CameraId != null ? Convert.ToString(r.CameraId) : "CAM_PANEL_01",
+                        AlgorithmType = r.AlgorithmType != null ? Convert.ToString(r.AlgorithmType) : "PRESENCE",
+                        ExpectedValue = r.ExpectedValue != null ? Convert.ToString(r.ExpectedValue) : "PRESENT",
+                        Tolerance = r.Tolerance != null ? Convert.ToDouble(r.Tolerance) : 0,
+                        MinConfidence = r.MinConfidence != null ? Convert.ToDouble(r.MinConfidence) : 0.85,
+                        IsRequired = ToBool(r.IsRequired, true),
+                        ExecutionOrder = r.ExecutionOrder != null ? Convert.ToInt32(r.ExecutionOrder) : 1,
+                        Enabled = ToBool(r.Enabled, true),
+                        ROIs = new List<InspectionROI>()
+                    };
+                    pointsDict[pId] = pt;
+                }
+
+                if (r.r_ROI_ID != null && !Convert.IsDBNull(r.r_ROI_ID))
+                {
+                    pt.ROIs.Add(new InspectionROI
+                    {
+                        ROI_ID = Convert.ToInt32(r.r_ROI_ID),
+                        InspectionPoint_ID = pId,
+                        Name = r.r_Name != null ? Convert.ToString(r.r_Name) : "ROI",
+                        X = Convert.ToInt32(r.r_X),
+                        Y = Convert.ToInt32(r.r_Y),
+                        Width = Convert.ToInt32(r.r_Width),
+                        Height = Convert.ToInt32(r.r_Height),
+                        ShapeType = r.r_ShapeType != null ? Convert.ToString(r.r_ShapeType) : "RECTANGLE"
+                    });
+                }
             }
 
-            if (r.r_ROI_ID != null)
-            {
-                pt.ROIs.Add(new InspectionROI
-                {
-                    ROI_ID = Convert.ToInt32(r.r_ROI_ID),
-                    InspectionPoint_ID = pId,
-                    Name = r.r_Name ?? "ROI",
-                    X = Convert.ToInt32(r.r_X),
-                    Y = Convert.ToInt32(r.r_Y),
-                    Width = Convert.ToInt32(r.r_Width),
-                    Height = Convert.ToInt32(r.r_Height),
-                    ShapeType = r.r_ShapeType ?? "RECTANGLE"
-                });
-            }
+            return Ok(pointsDict.Values);
         }
-
-        return Ok(pointsDict.Values);
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting all inspection points");
+            return StatusCode(500, new { Success = false, Message = ex.Message });
+        }
     }
 
     [HttpPost("point")]
     public async Task<IActionResult> SavePoint([FromBody] InspectionPoint point)
     {
-        const string sql = @"
-            UPDATE InspectionPoint SET
-                Name = @Name,
-                Description = @Description,
-                CameraId = @CameraId,
-                AlgorithmType = @AlgorithmType,
-                ExpectedValue = @ExpectedValue,
-                Tolerance = @Tolerance,
-                MinConfidence = @MinConfidence,
-                IsRequired = @IsRequired
-            WHERE InspectionPoint_ID = @InspectionPoint_ID";
-
-        int rows = await _db.ExecuteAsync(sql, new
+        try
         {
-            point.Name,
-            point.Description,
-            point.CameraId,
-            point.AlgorithmType,
-            point.ExpectedValue,
-            point.Tolerance,
-            point.MinConfidence,
-            IsRequired = point.IsRequired ? 1 : 0,
-            point.InspectionPoint_ID
-        });
+            if (point == null) return BadRequest(new { Success = false, Message = "Punto inválido" });
 
-        if (point.ROIs != null && point.ROIs.Any())
-        {
-            foreach (var roi in point.ROIs)
+            const string sql = @"
+                UPDATE InspectionPoint SET
+                    Name = @Name,
+                    Description = @Description,
+                    CameraId = @CameraId,
+                    AlgorithmType = @AlgorithmType,
+                    ExpectedValue = @ExpectedValue,
+                    Tolerance = @Tolerance,
+                    MinConfidence = @MinConfidence,
+                    IsRequired = @IsRequired
+                WHERE InspectionPoint_ID = @InspectionPoint_ID";
+
+            int rows = await _db.ExecuteAsync(sql, new
             {
-                roi.InspectionPoint_ID = point.InspectionPoint_ID;
-                await _planService.SaveROIAsync(roi);
-            }
-        }
+                point.Name,
+                point.Description,
+                point.CameraId,
+                point.AlgorithmType,
+                point.ExpectedValue,
+                point.Tolerance,
+                point.MinConfidence,
+                IsRequired = point.IsRequired ? 1 : 0,
+                point.InspectionPoint_ID
+            });
 
-        return Ok(new { Success = true, Point = point });
+            if (point.ROIs != null && point.ROIs.Any())
+            {
+                foreach (var roi in point.ROIs)
+                {
+                    roi.InspectionPoint_ID = point.InspectionPoint_ID;
+                    await _planService.SaveROIAsync(roi);
+                }
+            }
+
+            return Ok(new { Success = true, Point = point });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving inspection point {Id}", point?.InspectionPoint_ID);
+            return StatusCode(500, new { Success = false, Message = ex.Message });
+        }
     }
 
     [HttpPost("point/create")]
     public async Task<IActionResult> CreatePoint([FromBody] CreatePointDto point)
     {
-        if (string.IsNullOrWhiteSpace(point.InspectionPoint_ID))
+        try
         {
-            point.InspectionPoint_ID = "IP_" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
-        }
-        if (string.IsNullOrWhiteSpace(point.Code))
-        {
-            point.Code = "PT_" + Guid.NewGuid().ToString("N")[..4].ToUpperInvariant();
-        }
-
-        const string sqlInsertPoint = @"
-            INSERT INTO InspectionPoint (
-                InspectionPoint_ID, Code, Name, Description, PieceType, CameraId,
-                AlgorithmType, ExpectedValue, Tolerance, MinConfidence, IsRequired,
-                ExecutionOrder, TimeoutMs, Enabled
-            ) VALUES (
-                @InspectionPoint_ID, @Code, @Name, @Description, @PieceType, @CameraId,
-                @AlgorithmType, @ExpectedValue, @Tolerance, @MinConfidence, @IsRequired,
-                @ExecutionOrder, @TimeoutMs, @Enabled
-            )";
-
-        await _db.ExecuteAsync(sqlInsertPoint, new
-        {
-            point.InspectionPoint_ID,
-            point.Code,
-            point.Name,
-            point.Description,
-            point.PieceType,
-            point.CameraId,
-            point.AlgorithmType,
-            point.ExpectedValue,
-            point.Tolerance,
-            point.MinConfidence,
-            IsRequired = point.IsRequired ? 1 : 0,
-            point.ExecutionOrder,
-            point.TimeoutMs,
-            Enabled = point.Enabled ? 1 : 0
-        });
-
-        if (point.ROIs != null && point.ROIs.Any())
-        {
-            foreach (var roi in point.ROIs)
+            if (point == null)
             {
-                roi.InspectionPoint_ID = point.InspectionPoint_ID;
-                await _planService.SaveROIAsync(roi);
+                return BadRequest(new { Success = false, Message = "Datos de punto requeridos" });
             }
-        }
-        else
-        {
-            await _planService.SaveROIAsync(new InspectionROI
-            {
-                InspectionPoint_ID = point.InspectionPoint_ID,
-                Name = "ROI_1",
-                X = 150,
-                Y = 150,
-                Width = 140,
-                Height = 120,
-                ShapeType = "RECTANGLE"
-            });
-        }
 
-        // Si se especificó variante, vincular directamente al plan activo
-        if (!string.IsNullOrWhiteSpace(point.Modelo) && !string.IsNullOrWhiteSpace(point.Mano) && !string.IsNullOrWhiteSpace(point.Posicion))
-        {
-            var plan = await _planService.EnsurePlanForVariantAsync(point.PieceType, point.Modelo, point.Mano, point.Posicion);
-            if (plan != null && plan.Versions.Any())
+            if (string.IsNullOrWhiteSpace(point.InspectionPoint_ID))
             {
-                await _planService.AddPointToPlanVersionAsync(plan.Versions[0].Version_ID, point.InspectionPoint_ID, point.ExecutionOrder, point.IsRequired);
+                point.InspectionPoint_ID = "IP_" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
             }
-        }
+            if (string.IsNullOrWhiteSpace(point.Code))
+            {
+                point.Code = "PT_" + Guid.NewGuid().ToString("N")[..4].ToUpperInvariant();
+            }
 
-        return Ok(new { Success = true, Point = point });
+            // Verificar si el ID ya existe para decidir entre INSERT o UPDATE
+            const string sqlCheck = "SELECT COUNT(1) FROM InspectionPoint WHERE InspectionPoint_ID = @InspectionPoint_ID";
+            int exists = await _db.QuerySingleOrDefaultAsync<int>(sqlCheck, new { point.InspectionPoint_ID });
+
+            if (exists > 0)
+            {
+                const string sqlUpdate = @"
+                    UPDATE InspectionPoint SET
+                        Code = @Code,
+                        Name = @Name,
+                        Description = @Description,
+                        PieceType = @PieceType,
+                        CameraId = @CameraId,
+                        AlgorithmType = @AlgorithmType,
+                        ExpectedValue = @ExpectedValue,
+                        Tolerance = @Tolerance,
+                        MinConfidence = @MinConfidence,
+                        IsRequired = @IsRequired,
+                        ExecutionOrder = @ExecutionOrder,
+                        TimeoutMs = @TimeoutMs,
+                        Enabled = @Enabled
+                    WHERE InspectionPoint_ID = @InspectionPoint_ID";
+
+                await _db.ExecuteAsync(sqlUpdate, new
+                {
+                    point.InspectionPoint_ID,
+                    point.Code,
+                    point.Name,
+                    point.Description,
+                    point.PieceType,
+                    point.CameraId,
+                    point.AlgorithmType,
+                    point.ExpectedValue,
+                    point.Tolerance,
+                    point.MinConfidence,
+                    IsRequired = point.IsRequired ? 1 : 0,
+                    point.ExecutionOrder,
+                    point.TimeoutMs,
+                    Enabled = point.Enabled ? 1 : 0
+                });
+            }
+            else
+            {
+                const string sqlInsertPoint = @"
+                    INSERT INTO InspectionPoint (
+                        InspectionPoint_ID, Code, Name, Description, PieceType, CameraId,
+                        AlgorithmType, ExpectedValue, Tolerance, MinConfidence, IsRequired,
+                        ExecutionOrder, TimeoutMs, Enabled
+                    ) VALUES (
+                        @InspectionPoint_ID, @Code, @Name, @Description, @PieceType, @CameraId,
+                        @AlgorithmType, @ExpectedValue, @Tolerance, @MinConfidence, @IsRequired,
+                        @ExecutionOrder, @TimeoutMs, @Enabled
+                    )";
+
+                await _db.ExecuteAsync(sqlInsertPoint, new
+                {
+                    point.InspectionPoint_ID,
+                    point.Code,
+                    point.Name,
+                    point.Description,
+                    point.PieceType,
+                    point.CameraId,
+                    point.AlgorithmType,
+                    point.ExpectedValue,
+                    point.Tolerance,
+                    point.MinConfidence,
+                    IsRequired = point.IsRequired ? 1 : 0,
+                    point.ExecutionOrder,
+                    point.TimeoutMs,
+                    Enabled = point.Enabled ? 1 : 0
+                });
+            }
+
+            if (point.ROIs != null && point.ROIs.Any())
+            {
+                foreach (var roi in point.ROIs)
+                {
+                    roi.InspectionPoint_ID = point.InspectionPoint_ID;
+                    await _planService.SaveROIAsync(roi);
+                }
+            }
+            else
+            {
+                await _planService.SaveROIAsync(new InspectionROI
+                {
+                    InspectionPoint_ID = point.InspectionPoint_ID,
+                    Name = "ROI_1",
+                    X = 150,
+                    Y = 150,
+                    Width = 140,
+                    Height = 120,
+                    ShapeType = "RECTANGLE"
+                });
+            }
+
+            // Si se especificó variante, vincular directamente al plan activo
+            if (!string.IsNullOrWhiteSpace(point.Modelo) && !string.IsNullOrWhiteSpace(point.Mano) && !string.IsNullOrWhiteSpace(point.Posicion))
+            {
+                var plan = await _planService.EnsurePlanForVariantAsync(point.PieceType, point.Modelo, point.Mano, point.Posicion);
+                if (plan != null && plan.Versions.Any())
+                {
+                    await _planService.AddPointToPlanVersionAsync(plan.Versions[0].Version_ID, point.InspectionPoint_ID, point.ExecutionOrder, point.IsRequired);
+                }
+            }
+
+            return Ok(new { Success = true, Point = point });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error al crear o asociar punto de inspección {Code}", point?.Code);
+            return StatusCode(500, new { Success = false, Message = ex.Message });
+        }
     }
 
     [HttpPost("plan/clone")]

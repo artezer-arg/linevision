@@ -660,7 +660,7 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ frames }) => {
     try {
       const res = await api.createPoint(newPt);
       if (res && (res.success || res.Success)) {
-        const created = res.point || newPt;
+        const created = res.point || res.Point || newPt;
         setPoints(prev => [...prev, created]);
         setSelectedPointId(created.inspectionPoint_ID);
         setShowCreateModal(false);
@@ -669,11 +669,11 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ frames }) => {
         showFeedback('success', `Nuevo punto "${created.name}" asignado a ${selectedModel} ${selectedHand} ${selectedPos}`);
         await loadVariantPlan(activeStepTab, selectedModel, selectedHand, selectedPos);
       } else {
-        showFeedback('error', 'Error al crear punto en base de datos');
+        showFeedback('error', res?.message || res?.Message || 'Error al crear punto en base de datos');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      showFeedback('error', 'Error de red al crear punto');
+      showFeedback('error', err?.message || 'Error de red al crear punto');
     } finally {
       setSaving(false);
     }

@@ -1,4 +1,4 @@
-﻿-- ============================================================================
+-- ============================================================================
 -- LINEVISION INDUSTRIAL AUTOMATION - ESTACIÓN DL02
 -- ESQUEMA COMPLETO IDEMPOTENTE PARA SQLITE
 -- * No borra ni sobreescribe tablas o datos existentes.
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS CradleQR (
 
 CREATE TABLE IF NOT EXISTS InspectionPoint (
     InspectionPoint_ID TEXT PRIMARY KEY,
-    Code TEXT NOT NULL UNIQUE,
+    Code TEXT NOT NULL,
     Name TEXT NOT NULL,
     Description TEXT,
     PieceType TEXT NOT NULL,

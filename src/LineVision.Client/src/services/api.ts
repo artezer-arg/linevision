@@ -199,42 +199,79 @@ export const api = {
   },
 
   async getAllPoints() {
-    const res = await fetch(`${API_BASE}/api/calibration/points`);
-    return await res.json();
+    try {
+      const res = await fetch(`${API_BASE}/api/calibration/points`);
+      if (!res.ok) return [];
+      return await res.json().catch(() => []);
+    } catch {
+      return [];
+    }
   },
 
   async savePoint(point: any) {
-    const res = await fetch(`${API_BASE}/api/calibration/point`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(point)
-    });
-    return await res.json();
+    try {
+      const res = await fetch(`${API_BASE}/api/calibration/point`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(point)
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return { success: false, message: data?.message || data?.Message || `Error ${res.status}` };
+      }
+      return data || { success: true };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Error de conexión' };
+    }
   },
 
   async saveROI(roi: any) {
-    const res = await fetch(`${API_BASE}/api/calibration/roi`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(roi)
-    });
-    return await res.json();
+    try {
+      const res = await fetch(`${API_BASE}/api/calibration/roi`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(roi)
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return { success: false, message: data?.message || data?.Message || `Error ${res.status}` };
+      }
+      return data || { success: true };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Error de conexión' };
+    }
   },
 
   async createPoint(point: any) {
-    const res = await fetch(`${API_BASE}/api/calibration/point/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(point)
-    });
-    return await res.json();
+    try {
+      const res = await fetch(`${API_BASE}/api/calibration/point/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(point)
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return { success: false, message: data?.message || data?.Message || `Error ${res.status}: ${res.statusText}` };
+      }
+      return data || { success: false, message: 'Respuesta vacía del servidor' };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Error de conexión con el servidor' };
+    }
   },
 
   async deletePoint(id: string) {
-    const res = await fetch(`${API_BASE}/api/calibration/point/${encodeURIComponent(id)}`, {
-      method: 'DELETE'
-    });
-    return await res.json();
+    try {
+      const res = await fetch(`${API_BASE}/api/calibration/point/${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return { success: false, message: data?.message || data?.Message || `Error ${res.status}` };
+      }
+      return data || { success: true };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Error de conexión' };
+    }
   },
 
   async captureTemplate(id: string) {

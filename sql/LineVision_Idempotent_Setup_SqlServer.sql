@@ -1,4 +1,4 @@
-﻿-- ============================================================================
+-- ============================================================================
 -- LINEVISION INDUSTRIAL AUTOMATION - ESTACIÓN DL02
 -- ESQUEMA COMPLETO IDEMPOTENTE PARA MICROSOFT SQL SERVER / AZURE SQL
 -- ============================================================================
@@ -244,7 +244,7 @@ BEGIN
     PRINT 'Creando tabla: InspectionPoint...';
     CREATE TABLE [dbo].[InspectionPoint] (
         [InspectionPoint_ID] VARCHAR(50) NOT NULL PRIMARY KEY,
-        [Code] VARCHAR(50) NOT NULL UNIQUE,
+        [Code] VARCHAR(50) NOT NULL,
         [Name] VARCHAR(100) NOT NULL,
         [Description] NVARCHAR(255) NULL,
         [PieceType] VARCHAR(20) NOT NULL, -- 'CRADLE', 'PANEL'
@@ -262,7 +262,20 @@ BEGIN
 END
 ELSE
 BEGIN
-    PRINT 'Tabla InspectionPoint ya existe. Omitiendo creación.';
+    PRINT 'Tabla InspectionPoint ya existe. Verificando índices...';
+    DECLARE @ConstraintName NVARCHAR(200);
+    SELECT @ConstraintName = kc.name
+    FROM sys.key_constraints kc
+    JOIN sys.tables t ON kc.parent_object_id = t.object_id
+    JOIN sys.index_columns ic ON kc.parent_object_id = ic.object_id AND kc.unique_index_id = ic.index_id
+    JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+    WHERE t.name = 'InspectionPoint' AND c.name = 'Code' AND kc.type = 'UQ';
+
+    IF @ConstraintName IS NOT NULL
+    BEGIN
+        PRINT 'Eliminando restricción UNIQUE obsoleta sobre InspectionPoint(Code)...';
+        EXEC('ALTER TABLE [dbo].[InspectionPoint] DROP CONSTRAINT ' + @ConstraintName);
+    END;
 END;
 
 -- ----------------------------------------------------------------------------
@@ -332,8 +345,18 @@ BEGIN
         [Version_ID] INT NOT NULL,
         [InspectionPoint_ID] VARCHAR(50) NOT NULL,
         [ExecutionOrder] INT NOT NULL,
+        [IsRequiredOverride] BIT NULL,
         CONSTRAINT [UQ_InspectionPlanDetail_Version_Point] UNIQUE ([Version_ID], [InspectionPoint_ID])
     );
+END
+ELSE
+BEGIN
+    PRINT 'Tabla InspectionPlanDetail ya existe. Verificando columnas...';
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('InspectionPlanDetail') AND name = 'IsRequiredOverride')
+    BEGIN
+        PRINT 'Agregando columna faltante IsRequiredOverride a InspectionPlanDetail...';
+        ALTER TABLE [dbo].[InspectionPlanDetail] ADD [IsRequiredOverride] BIT NULL;
+    END;
 END;
 
 -- ----------------------------------------------------------------------------

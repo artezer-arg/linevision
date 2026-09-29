@@ -528,6 +528,16 @@ public class DatabaseService : IDatabaseService
             }
         }
 
+        // 4. last_insert_rowid() conversion to SCOPE_IDENTITY() for SqlServer
+        if (result.Contains("last_insert_rowid()", StringComparison.OrdinalIgnoreCase))
+        {
+            result = "SET NOCOUNT ON;\n" + System.Text.RegularExpressions.Regex.Replace(
+                result, 
+                @"last_insert_rowid\(\)", 
+                "CAST(SCOPE_IDENTITY() AS INT)", 
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
         return result;
     }
 
@@ -710,7 +720,7 @@ public class DatabaseService : IDatabaseService
 
                 CREATE TABLE IF NOT EXISTS InspectionPoint (
                     InspectionPoint_ID TEXT PRIMARY KEY,
-                    Code TEXT NOT NULL UNIQUE,
+                    Code TEXT NOT NULL,
                     Name TEXT NOT NULL,
                     Description TEXT,
                     PieceType TEXT NOT NULL,
