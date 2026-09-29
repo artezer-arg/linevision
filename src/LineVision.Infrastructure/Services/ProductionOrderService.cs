@@ -69,13 +69,17 @@ public class ProductionOrderService : IProductionOrderService
             if (currentPointer <= 0) currentPointer = 18;
 
             // 2. Buscar la orden asociada al puntero obtenido:
-            // Coincidencia por ID_OrdenProduccion, ID_Secuencia o Secuencia
-            var order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(
-                @"SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion 
-                  FROM OrdenProduccion 
-                  WHERE ID_OrdenProduccion = @orderId OR ID_Secuencia = @orderId OR Secuencia = CAST(@orderId AS VARCHAR(20))
-                  ORDER BY ID_OrdenProduccion ASC LIMIT 1",
-                new { orderId = currentPointer }, ct);
+            // El puntero de Puesto (puntero_id_ordenproduccion) apunta al ID_OrdenProduccion
+            var order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(_sqlGetOrder, new { orderId = currentPointer }, ct);
+            if (order == null)
+            {
+                order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(
+                    @"SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion 
+                      FROM OrdenProduccion 
+                      WHERE ID_OrdenProduccion = @orderId OR ID_Secuencia = @orderId OR Secuencia = CAST(@orderId AS VARCHAR(20))
+                      ORDER BY ID_OrdenProduccion ASC LIMIT 1",
+                    new { orderId = currentPointer }, ct);
+            }
 
             if (order == null)
             {
@@ -125,16 +129,16 @@ public class ProductionOrderService : IProductionOrderService
                     }
                 }
 
-                // 5. Si aún no existe orden para este puntero, generarla asegurando que la secuencia sea el ID del puntero
+                // 5. Si aún no existe orden para este puntero, generarla asegurando coherencia de secuencia
                 if (order == null)
                 {
-                    _logger.LogInformation("No existing order found for DL01 pointer {Pointer}. Creating order for sequence {Seq}...", currentPointer, currentPointer);
+                    _logger.LogInformation("No existing order found for DL01 pointer {Pointer}. Creating fallback order...", currentPointer);
                     string seqStr = currentPointer < 10000 ? currentPointer.ToString().PadLeft(4, '0') : currentPointer.ToString();
                     order = new ProductionOrder
                     {
                         ID_OrdenProduccion = currentPointer,
                         ID_OrdenCliente = $"ORD-{currentPointer}",
-                        ID_Secuencia = currentPointer,
+                        ID_Secuencia = currentPointer < 10000 ? currentPointer : 1,
                         Secuencia = seqStr,
                         Modelo = "D3H",
                         Mano = "RH",
@@ -154,13 +158,28 @@ public class ProductionOrderService : IProductionOrderService
                 }
             }
 
-            // 6. Directiva explícita de planta: La secuencia debe ser el id que se encuentra en la tabla puesto en el campo puntero_id_ordenproduccion donde el campo puesto es DL01
+            // 6. Respetar y preservar el verdadero NÚMERO DE SECUENCIA de la orden consultada
             if (order != null)
             {
-                order.ID_Secuencia = currentPointer;
-                order.Secuencia = currentPointer < 10000 
-                    ? currentPointer.ToString().PadLeft(4, '0') 
-                    : currentPointer.ToString();
+                if (!string.IsNullOrWhiteSpace(order.Secuencia))
+                {
+                    // Si viene como entero simple ("1", "18"), formatear a "0001", "0018"
+                    if (int.TryParse(order.Secuencia, out int parsedNum) && parsedNum < 10000 && order.Secuencia.Length < 4)
+                    {
+                        order.Secuencia = parsedNum.ToString().PadLeft(4, '0');
+                    }
+                }
+                else if (order.ID_Secuencia > 0)
+                {
+                    order.Secuencia = order.ID_Secuencia < 10000 
+                        ? order.ID_Secuencia.ToString().PadLeft(4, '0') 
+                        : order.ID_Secuencia.ToString();
+                }
+
+                if (order.ID_Secuencia <= 0 && int.TryParse(order.Secuencia, out int seqId))
+                {
+                    order.ID_Secuencia = seqId;
+                }
             }
 
             return order;
