@@ -19,6 +19,7 @@ public class PLCSimulator : IPLCService
     private int _recipeBRegister = 0;
     private int _echoARegister = 0;
     private int _echoBRegister = 0;
+    private int _handshakeOffset6 = 20; // 20 = Request Recipe, 10 = Recipe Ack
 
     // Fault Injection Flags
     private bool _simulateTimeout = false;
@@ -126,6 +127,23 @@ public class PLCSimulator : IPLCService
         _recipeBRegister = recipeB;
 
         _logger.LogInformation("PLC SIMULATOR: Wrote Recipe_A={A}, Recipe_B={B} to registers", recipeA, recipeB);
+
+        // Handshake DB48 Offset 6:
+        // Si el valor enviado es la receta de la orden (distinto de 24, ej. 15), transicionar Offset 6 a 10 tras 200ms
+        if (recipeB != 24)
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(200);
+                _handshakeOffset6 = 10;
+                _logger.LogInformation("PLC SIMULATOR: Receta {B} aplicada. Handshake DB48 Offset 6 actualizado a 10 (Confirmado)", recipeB);
+            });
+        }
+        else
+        {
+            _logger.LogInformation("PLC SIMULATOR: Receta de reposo 24 recibida. Handshake finalizado en reposo.");
+        }
+
         return Task.FromResult(true);
     }
 
@@ -203,8 +221,17 @@ public class PLCSimulator : IPLCService
         _recipeReadyBit = false;
         _recipeReceivedBit = false;
         _rawState = 0; // FREE
-        _logger.LogInformation("PLC SIMULATOR: Signals cleared, state reset to FREE");
+        _handshakeOffset6 = 20; // Reset ready for next cycle
+        _logger.LogInformation("PLC SIMULATOR: Signals cleared, state reset to FREE, Handshake Offset 6 reset to 20");
         return Task.FromResult(true);
+    }
+
+    public int ReadOffset6() => _handshakeOffset6;
+
+    public void SetOffset6(int val)
+    {
+        _handshakeOffset6 = val;
+        _logger.LogInformation("PLC SIMULATOR: Handshake register (DB48 Offset 6) explicitly set to {Val}", val);
     }
 
     public async Task<bool> WaitForStateAsync(PLCLogicalState targetState, TimeSpan timeout, CancellationToken ct = default)

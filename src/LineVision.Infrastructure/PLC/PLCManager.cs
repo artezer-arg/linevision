@@ -602,6 +602,296 @@ public class PLCManager : IPLCService
         }
     }
 
+    public int ReadSimulatorOffset6() => _simulator.ReadOffset6();
+    public void SetSimulatorOffset6(int val) => _simulator.SetOffset6(val);
+
+    public async Task<S7ReadResult> ReadS7Offset6DirectAsync(
+        string ip,
+        string address = "DB48.DBW6",
+        short rack = 0,
+        short slot = 1,
+        CancellationToken ct = default)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            if (string.Equals(_config.Protocol, "SIMULATOR", StringComparison.OrdinalIgnoreCase))
+            {
+                int simVal = _simulator.ReadOffset6();
+                return new S7ReadResult
+                {
+                    Success = true,
+                    IPAddress = ip,
+                    Address = address,
+                    Value = simVal,
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                    Message = $"SIMULADOR: Offset 6 valor actual = {simVal}"
+                };
+            }
+
+            using var plc = new S7.Net.Plc(S7.Net.CpuType.S71500, ip, rack, slot);
+            await plc.OpenAsync(ct);
+            if (!plc.IsConnected)
+            {
+                int simVal = _simulator.ReadOffset6();
+                return new S7ReadResult
+                {
+                    Success = false,
+                    IPAddress = ip,
+                    Address = address,
+                    Value = simVal,
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                    Message = $"No se pudo conectar al PLC en {ip}:102. (Fallback simulador: {simVal})"
+                };
+            }
+
+            string cleanAddr = address.Split(' ')[0].Trim();
+            int val = 0;
+
+            try
+            {
+                var read = await plc.ReadAsync(cleanAddr);
+                val = Convert.ToInt32(read);
+            }
+            catch
+            {
+                var b = await plc.ReadBytesAsync(S7.Net.DataType.DataBlock, 48, 6, 2);
+                if (b != null && b.Length >= 2)
+                {
+                    val = (b[0] << 8) | b[1];
+                }
+            }
+
+            sw.Stop();
+            return new S7ReadResult
+            {
+                Success = true,
+                IPAddress = ip,
+                Address = cleanAddr,
+                Value = val,
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                Message = $"Valor {val} leído de {cleanAddr} en PLC {ip}"
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogError(ex, "Error leyendo offset 6 en Siemens S7 {IP}:{Addr}", ip, address);
+            return new S7ReadResult
+            {
+                Success = false,
+                IPAddress = ip,
+                Address = address,
+                Value = _simulator.ReadOffset6(),
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                Message = $"Error leyendo Siemens S7: {ex.Message}"
+            };
+        }
+    }
+
+    public async Task<S7HandshakeResult> ExecuteRecipeHandshakeAsync(
+        string ip,
+        short sequenceRecipe,
+        string recipeAddress = "DB48.DBW2",
+        string handshakeAddress = "DB48.DBW6",
+        short reqValue = 20,
+        short ackValue = 10,
+        short idleValue = 24,
+        short rack = 0,
+        short slot = 1,
+        int maxPollTimeoutMs = 30000,
+        Action<string>? statusCallback = null,
+        CancellationToken ct = default)
+    {
+        var sw = Stopwatch.StartNew();
+        string cleanRecipeAddr = recipeAddress.Split(' ')[0].Trim();
+        string cleanHandshakeAddr = handshakeAddress.Split(' ')[0].Trim();
+
+        _logger.LogInformation("PLC HANDSHAKE INICIADO: Receta={Recipe}, RecAddress={RecAddr}, HandshakeAddr={HsAddr}, ReqVal={ReqVal}, AckVal={AckVal}, IdleVal={IdleVal}",
+            sequenceRecipe, cleanRecipeAddr, cleanHandshakeAddr, reqValue, ackValue, idleValue);
+
+        if (string.Equals(_config.Protocol, "SIMULATOR", StringComparison.OrdinalIgnoreCase))
+        {
+            return await ExecuteSimulatedHandshakeAsync(sequenceRecipe, cleanRecipeAddr, cleanHandshakeAddr, reqValue, ackValue, idleValue, statusCallback, ct);
+        }
+
+        try
+        {
+            using var plc = new S7.Net.Plc(S7.Net.CpuType.S71500, ip, rack, slot);
+            await plc.OpenAsync(ct);
+            if (!plc.IsConnected)
+            {
+                string errMsg = $"No se pudo conectar al PLC Siemens S7 en {ip}:102 (Rack={rack}, Slot={slot})";
+                _logger.LogWarning("Siemens S7 Handshake: {Err}. Derivando a simulación local.", errMsg);
+                statusCallback?.Invoke(errMsg + " -> Ejecutando en simulador");
+                return await ExecuteSimulatedHandshakeAsync(sequenceRecipe, cleanRecipeAddr, cleanHandshakeAddr, reqValue, ackValue, idleValue, statusCallback, ct);
+            }
+
+            async Task<int> ReadHandshakeRawAsync()
+            {
+                try
+                {
+                    var val = await plc.ReadAsync(cleanHandshakeAddr);
+                    int num = Convert.ToInt32(val);
+                    if (num == reqValue || num == ackValue) return num;
+
+                    int lowByte = num & 0xFF;
+                    int highByte = (num >> 8) & 0xFF;
+                    if (lowByte == reqValue || lowByte == ackValue) return lowByte;
+                    if (highByte == reqValue || highByte == ackValue) return highByte;
+
+                    return num;
+                }
+                catch
+                {
+                    var b = await plc.ReadBytesAsync(S7.Net.DataType.DataBlock, 48, 6, 2);
+                    if (b != null && b.Length >= 2)
+                    {
+                        int word = (b[0] << 8) | b[1];
+                        if (word == reqValue || word == ackValue) return word;
+                        if (b[0] == reqValue || b[0] == ackValue) return b[0];
+                        if (b[1] == reqValue || b[1] == ackValue) return b[1];
+                        return word;
+                    }
+                    throw;
+                }
+            }
+
+            // 1. ESPERAR A QUE EL PLC SOLICITE RECETA (Offset 6 == reqValue [20])
+            statusCallback?.Invoke($"Paso 2.1: Monitoreando {cleanHandshakeAddr}. Esperando solicitud del PLC (Valor = {reqValue})...");
+            int currentVal = await ReadHandshakeRawAsync();
+
+            var reqSw = Stopwatch.StartNew();
+            while (currentVal != reqValue && !ct.IsCancellationRequested && reqSw.ElapsedMilliseconds < maxPollTimeoutMs)
+            {
+                statusCallback?.Invoke($"PLC {cleanHandshakeAddr}={currentVal}. Esperando {reqValue} para enviar receta {sequenceRecipe}...");
+                await Task.Delay(100, ct);
+                currentVal = await ReadHandshakeRawAsync();
+            }
+
+            int reqDetected = currentVal;
+            _logger.LogInformation("PLC HANDSHAKE: Solicitud detectada ({Val}) en {Addr}. Procediendo a transmitir receta {Recipe}",
+                currentVal, cleanHandshakeAddr, sequenceRecipe);
+
+            // 2. TRANSMITIR RECETA DE SECUENCIA (15) CONTINUAMENTE HASTA DETECTAR ackValue (10)
+            statusCallback?.Invoke($"Paso 2.2: Solicitud {reqValue} detectada. Transmitiendo receta {sequenceRecipe} a {cleanRecipeAddr}...");
+            await plc.WriteAsync(cleanRecipeAddr, sequenceRecipe);
+
+            var ackSw = Stopwatch.StartNew();
+            currentVal = await ReadHandshakeRawAsync();
+
+            while (currentVal != ackValue && !ct.IsCancellationRequested && ackSw.ElapsedMilliseconds < maxPollTimeoutMs)
+            {
+                await plc.WriteAsync(cleanRecipeAddr, sequenceRecipe);
+                statusCallback?.Invoke($"Receta {sequenceRecipe} enviada a {cleanRecipeAddr}. Esperando confirmación {cleanHandshakeAddr}=={ackValue} (Actual: {currentVal})...");
+                await Task.Delay(150, ct);
+                currentVal = await ReadHandshakeRawAsync();
+            }
+
+            // 3. AL DETECTAR ackValue (10), TRANSMITIR idleValue (24)
+            if (currentVal == ackValue)
+            {
+                _logger.LogInformation("PLC HANDSHAKE: Confirmación detectada ({Val}) en {Addr}. Transmitiendo valor de reposo {Idle} a {RecAddr}...",
+                    currentVal, cleanHandshakeAddr, idleValue, cleanRecipeAddr);
+                statusCallback?.Invoke($"Paso 2.3: PLC confirmó ({ackValue}). Escribiendo valor de reposo {idleValue} en {cleanRecipeAddr}...");
+
+                await plc.WriteAsync(cleanRecipeAddr, idleValue);
+                var readIdle = await plc.ReadAsync(cleanRecipeAddr);
+                short verifiedIdle = Convert.ToInt16(readIdle);
+
+                sw.Stop();
+                string msg = $"Handshake Siemens S7 completado: PLC solicitó con {reqDetected}, se transmitió receta {sequenceRecipe}, PLC confirmó con {ackValue}, y se dejó valor de reposo {idleValue} en {cleanRecipeAddr} (Verificado: {verifiedIdle}).";
+                _logger.LogInformation("{Msg}", msg);
+                statusCallback?.Invoke(msg);
+
+                return new S7HandshakeResult
+                {
+                    Success = true,
+                    IPAddress = ip,
+                    HandshakeAddress = cleanHandshakeAddr,
+                    RecipeAddress = cleanRecipeAddr,
+                    SequenceRecipeSent = sequenceRecipe,
+                    HandshakeReqDetected = reqDetected,
+                    HandshakeAckReceived = currentVal,
+                    IdleValueSent = idleValue,
+                    IdleValueVerified = verifiedIdle,
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                    Message = msg
+                };
+            }
+            else
+            {
+                sw.Stop();
+                string timeoutMsg = $"Handshake incompleto: Se transmitió receta {sequenceRecipe}, pero el PLC no respondió con {ackValue} dentro del tiempo límite (Último valor leído en {cleanHandshakeAddr}: {currentVal}).";
+                _logger.LogWarning("{Msg}", timeoutMsg);
+                statusCallback?.Invoke(timeoutMsg);
+
+                return new S7HandshakeResult
+                {
+                    Success = false,
+                    IPAddress = ip,
+                    HandshakeAddress = cleanHandshakeAddr,
+                    RecipeAddress = cleanRecipeAddr,
+                    SequenceRecipeSent = sequenceRecipe,
+                    HandshakeReqDetected = reqDetected,
+                    HandshakeAckReceived = currentVal,
+                    IdleValueSent = idleValue,
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                    Message = timeoutMsg
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogError(ex, "Excepción durante handshake Siemens S7 en {IP}", ip);
+            return await ExecuteSimulatedHandshakeAsync(sequenceRecipe, cleanRecipeAddr, cleanHandshakeAddr, reqValue, ackValue, idleValue, statusCallback, ct);
+        }
+    }
+
+    private async Task<S7HandshakeResult> ExecuteSimulatedHandshakeAsync(
+        short sequenceRecipe,
+        string recipeAddress,
+        string handshakeAddress,
+        short reqValue,
+        short ackValue,
+        short idleValue,
+        Action<string>? statusCallback,
+        CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        statusCallback?.Invoke($"[SIMULADOR] PLC solicitando receta ({handshakeAddress} == {reqValue})...");
+        _simulator.SetOffset6(reqValue);
+
+        await Task.Delay(100, ct);
+
+        statusCallback?.Invoke($"[SIMULADOR] Transmitiendo receta de orden {sequenceRecipe} a {recipeAddress}...");
+        await _simulator.WriteRecipeAsync(sequenceRecipe, sequenceRecipe, ct);
+
+        await Task.Delay(250, ct);
+        int ack = _simulator.ReadOffset6();
+
+        statusCallback?.Invoke($"[SIMULADOR] Confirmación {ack} recibida. Transmitiendo reposo {idleValue} a {recipeAddress}...");
+        await _simulator.WriteRecipeAsync(idleValue, idleValue, ct);
+
+        sw.Stop();
+        string msg = $"[SIMULADOR] Handshake completado: Solicitud={reqValue}, Receta={sequenceRecipe}, Confirmación={ack}, Reposo={idleValue}.";
+        return new S7HandshakeResult
+        {
+            Success = true,
+            IPAddress = "127.0.0.1 (SIMULATOR)",
+            HandshakeAddress = handshakeAddress,
+            RecipeAddress = recipeAddress,
+            SequenceRecipeSent = sequenceRecipe,
+            HandshakeReqDetected = reqValue,
+            HandshakeAckReceived = ack,
+            IdleValueSent = idleValue,
+            IdleValueVerified = idleValue,
+            DurationMs = (int)sw.ElapsedMilliseconds,
+            Message = msg
+        };
+    }
+
     public void SetSimulationState(PLCLogicalState state, int? echoA = null, int? echoB = null)
     {
         _simulator.SetSimulationState(state, echoA, echoB);
@@ -661,6 +951,31 @@ public class HandshakeTestResult
     public int SentRecipeB { get; set; }
     public int EchoRecipeA { get; set; }
     public int EchoRecipeB { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public int DurationMs { get; set; }
+}
+
+public class S7ReadResult
+{
+    public bool Success { get; set; }
+    public string IPAddress { get; set; } = string.Empty;
+    public string Address { get; set; } = string.Empty;
+    public int Value { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public int DurationMs { get; set; }
+}
+
+public class S7HandshakeResult
+{
+    public bool Success { get; set; }
+    public string IPAddress { get; set; } = string.Empty;
+    public string HandshakeAddress { get; set; } = "DB48.DBW6";
+    public string RecipeAddress { get; set; } = "DB48.DBW2";
+    public short SequenceRecipeSent { get; set; }
+    public int HandshakeReqDetected { get; set; }
+    public int HandshakeAckReceived { get; set; }
+    public short IdleValueSent { get; set; }
+    public short? IdleValueVerified { get; set; }
     public string Message { get; set; } = string.Empty;
     public int DurationMs { get; set; }
 }

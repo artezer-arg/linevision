@@ -310,6 +310,11 @@ export interface StationWorkflowConfig {
   plcRack: number;
   plcSlot: number;
   recipeAddress: string;
+  handshakeAddress?: string;
+  handshakeReqValue?: number;
+  handshakeAckValue?: number;
+  handshakeIdleValue?: number;
+  enableRecipeHandshake?: boolean;
   confirmationAddress: string;
   sendConfirmation: boolean;
   recipeTiming?: 'AFTER_ORDER_DETECTED' | 'AFTER_CRADLE_OK';

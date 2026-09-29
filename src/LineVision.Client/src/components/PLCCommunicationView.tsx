@@ -36,6 +36,11 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
     plcRack: 0,
     plcSlot: 1,
     recipeAddress: 'DB48.DBW2',
+    handshakeAddress: 'DB48.DBW6',
+    handshakeReqValue: 20,
+    handshakeAckValue: 10,
+    handshakeIdleValue: 24,
+    enableRecipeHandshake: true,
     confirmationAddress: 'DB48.DBX4.0',
     sendConfirmation: true,
     recipeTiming: 'AFTER_ORDER_DETECTED',
@@ -79,6 +84,14 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
   const [s7ConfirmVal, setS7ConfirmVal] = useState<boolean>(true);
   const [s7Loading, setS7Loading] = useState(false);
   const [s7Result, setS7Result] = useState<any>(null);
+
+  // Siemens S7 DB48 Handshake (20 -> Receta -> 10 -> 24)
+  const [s7HandshakeLoading, setS7HandshakeLoading] = useState(false);
+  const [s7HandshakeResult, setS7HandshakeResult] = useState<any>(null);
+  const [testRecipeVal, setTestRecipeVal] = useState<number>(15);
+  const [offset6Val, setOffset6Val] = useState<number | null>(null);
+  const [offset6Loading, setOffset6Loading] = useState(false);
+
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   // Protocols catalog - Solo Siemens S7
@@ -297,6 +310,64 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
       await fetchLiveStatus();
     } catch (err) {
       showToast('error', 'Error al limpiar señales');
+    }
+  };
+
+  const handleReadOffset6 = async () => {
+    setOffset6Loading(true);
+    try {
+      const res = await api.readS7Offset6(config.ipAddress, workflowConfig.handshakeAddress || 'DB48.DBW6');
+      if (res && res.success) {
+        setOffset6Val(res.value);
+        showToast('success', `Valor leído en ${res.address}: ${res.value}`);
+      } else {
+        setOffset6Val(res?.value ?? null);
+        showToast('error', res?.message || 'Error leyendo Offset 6');
+      }
+    } catch (e: any) {
+      showToast('error', e.message || 'Error leyendo Offset 6');
+    } finally {
+      setOffset6Loading(false);
+    }
+  };
+
+  const handleTestS7Handshake = async () => {
+    setS7HandshakeLoading(true);
+    setS7HandshakeResult(null);
+    try {
+      const res = await api.testS7Handshake({
+        ipAddress: config.ipAddress,
+        recipe: testRecipeVal,
+        recipeAddress: workflowConfig.recipeAddress || 'DB48.DBW2',
+        handshakeAddress: workflowConfig.handshakeAddress || 'DB48.DBW6',
+        reqValue: workflowConfig.handshakeReqValue ?? 20,
+        ackValue: workflowConfig.handshakeAckValue ?? 10,
+        idleValue: workflowConfig.handshakeIdleValue ?? 24,
+        rack: 0,
+        slot: 1
+      });
+      setS7HandshakeResult(res);
+      if (res && res.success) {
+        showToast('success', res.message || 'Handshake S7 completado exitosamente');
+      } else {
+        showToast('error', res?.message || 'Fallo en Handshake S7');
+      }
+    } catch (e: any) {
+      showToast('error', e.message || 'Error de red en handshake');
+    } finally {
+      setS7HandshakeLoading(false);
+    }
+  };
+
+  const handleSetSimOffset6 = async (val: number) => {
+    try {
+      const res = await api.setSimOffset6(val);
+      if (res && res.success) {
+        setOffset6Val(val);
+        showToast('info', `Offset 6 simulador forzado a ${val}`);
+      }
+    } catch (e: any) {
+      showToast('error', 'Error forzando simulador');
     }
   };
 
@@ -753,6 +824,70 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
                       />
                       <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500"></div>
                     </label>
+                  </div>
+                </div>
+
+                {/* PROTOCOLO HANDSHAKE RECETA DB48 */}
+                <div className="bg-gradient-to-r from-cyan-950/40 via-blue-950/30 to-indigo-950/40 border border-cyan-500/40 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-cyan-800/40 pb-2">
+                    <div className="flex items-center space-x-2">
+                      <Cpu className="w-4 h-4 text-cyan-400" />
+                      <span className="text-xs font-black text-cyan-300 uppercase tracking-wide">
+                        PROTOCOLO HANDSHAKE DE RECETA DB48 (20 → RECETA → 10 → 24)
+                      </span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={workflowConfig.enableRecipeHandshake ?? true}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, enableRecipeHandshake: e.target.checked }))}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500"></div>
+                    </label>
+                  </div>
+
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    Lee <strong>{workflowConfig.handshakeAddress || 'DB48.DBW6'}</strong>: Cuando devuelve <strong>{workflowConfig.handshakeReqValue ?? 20}</strong> envía la receta de la secuencia a <strong>{workflowConfig.recipeAddress || 'DB48.DBW2'}</strong>. No deja de enviarla hasta detectar <strong>{workflowConfig.handshakeAckValue ?? 10}</strong>, momento en el cual escribe <strong>{workflowConfig.handshakeIdleValue ?? 24}</strong> de reposo hasta la próxima orden.
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-1">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-300 block mb-1">Dirección Handshake (Offset 6)</label>
+                      <input
+                        type="text"
+                        value={workflowConfig.handshakeAddress || 'DB48.DBW6'}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, handshakeAddress: e.target.value }))}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-cyan-300 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-300 block mb-1">Valor Solicitud PLC (Req)</label>
+                      <input
+                        type="number"
+                        value={workflowConfig.handshakeReqValue ?? 20}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, handshakeReqValue: parseInt(e.target.value) || 20 }))}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-300 block mb-1">Valor Confirmación PLC (Ack)</label>
+                      <input
+                        type="number"
+                        value={workflowConfig.handshakeAckValue ?? 10}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, handshakeAckValue: parseInt(e.target.value) || 10 }))}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-300 block mb-1">Valor de Reposo (Idle)</label>
+                      <input
+                        type="number"
+                        value={workflowConfig.handshakeIdleValue ?? 24}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, handshakeIdleValue: parseInt(e.target.value) || 24 }))}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-emerald-400 font-mono font-bold"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1327,6 +1462,148 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
                   <div>Confirmación en DB48.DBX4.0: <strong className={s7Result.sendConfirmation ? (s7Result.confirmationVerified ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-400'}>
                     {s7Result.sendConfirmation ? (s7Result.confirmationVerified ? 'TRUE (OK)' : 'FALSE (NOK)') : 'DESACTIVADA (No enviada)'}
                   </strong></div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Card: Test Protocolo Handshake DB48 (20 -> Receta -> 10 -> 24) */}
+          <div className="bg-gradient-to-b from-industrial-card to-cyan-950/20 border-2 border-cyan-500/50 rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-cyan-800/50 pb-3 flex-wrap gap-2">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-lg bg-cyan-500/20 border border-cyan-400 flex items-center justify-center">
+                  <Activity className="w-5 h-5 text-cyan-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white tracking-wide">
+                    TEST HANDSHAKE DB48 (20 → RECETA → 10 → 24)
+                  </h3>
+                  <span className="text-[10px] text-cyan-300 font-mono">
+                    Lectura Offset 6 ({workflowConfig.handshakeAddress || 'DB48.DBW6'}) & Escritura ({workflowConfig.recipeAddress || 'DB48.DBW2'})
+                  </span>
+                </div>
+              </div>
+              <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-500/40">
+                PROTOCOLO PLANTA
+              </span>
+            </div>
+
+            {/* Monitor en Vivo de Offset 6 */}
+            <div className="bg-black/50 border border-cyan-900/60 rounded-xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
+                  <Radio className="w-4 h-4 text-cyan-400" />
+                  <span>Estado de Señal en {workflowConfig.handshakeAddress || 'DB48.DBW6'}:</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleReadOffset6}
+                  disabled={offset6Loading}
+                  className="px-3 py-1 rounded-lg bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-[10px] font-bold text-cyan-300 transition flex items-center space-x-1 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${offset6Loading ? 'animate-spin' : ''}`} />
+                  <span>{offset6Loading ? 'Leyendo...' : 'Leer Offset 6 Ahora'}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center space-x-3">
+                <div className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-700 font-mono text-lg font-black text-white min-w-[70px] text-center shadow-inner">
+                  {offset6Val !== null ? offset6Val : '--'}
+                </div>
+                <div className="text-xs space-y-1">
+                  {offset6Val === (workflowConfig.handshakeReqValue ?? 20) && (
+                    <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold inline-block animate-pulse">
+                      ● VALOR {offset6Val}: PLC SOLICITANDO RECETA
+                    </span>
+                  )}
+                  {offset6Val === (workflowConfig.handshakeAckValue ?? 10) && (
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold inline-block">
+                      ✓ VALOR {offset6Val}: PLC RECETA CONFIRMADA
+                    </span>
+                  )}
+                  {offset6Val !== (workflowConfig.handshakeReqValue ?? 20) && offset6Val !== (workflowConfig.handshakeAckValue ?? 10) && offset6Val !== null && (
+                    <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 font-mono inline-block">
+                      VALOR {offset6Val} (ESPERA O INACTIVO)
+                    </span>
+                  )}
+                  {offset6Val === null && (
+                    <span className="text-[11px] text-slate-500 italic block">
+                      Presiona "Leer Offset 6 Ahora" para consultar el valor actual del PLC.
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Forzar Simulador (Para pruebas locales) */}
+              <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
+                <span className="text-slate-400">Forzar Offset 6 (Banco / Simulador):</span>
+                <div className="flex items-center space-x-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleSetSimOffset6(20)}
+                    className="px-2.5 py-1 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-500/40 text-amber-300 font-bold transition"
+                  >
+                    Simular 20 (Pide)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetSimOffset6(10)}
+                    className="px-2.5 py-1 rounded bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 font-bold transition"
+                  >
+                    Simular 10 (Confirma)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Parámetros de Disparo de Prueba */}
+            <div className="space-y-2">
+              <label className="text-[11px] uppercase font-bold text-slate-300 block">
+                Receta de Prueba para la Secuencia:
+              </label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="number"
+                  value={testRecipeVal}
+                  onChange={e => setTestRecipeVal(parseInt(e.target.value) || 15)}
+                  placeholder="15"
+                  className="w-full bg-industrial-dark border border-industrial-border rounded-xl px-3 py-2 text-sm font-mono text-cyan-300 font-black text-center"
+                />
+                <button
+                  type="button"
+                  onClick={handleTestS7Handshake}
+                  disabled={s7HandshakeLoading}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs shadow-lg shadow-cyan-950/60 flex items-center space-x-2 transition disabled:opacity-50 shrink-0"
+                >
+                  <Play className={`w-4 h-4 ${s7HandshakeLoading ? 'animate-spin' : ''}`} />
+                  <span>{s7HandshakeLoading ? 'Ejecutando Handshake...' : 'Ejecutar Handshake Completo'}</span>
+                </button>
+              </div>
+              <span className="text-[10px] text-slate-400 block">
+                Simula el flujo completo: espera 20 en Offset 6 → envía {testRecipeVal} a DB48.DBW2 → espera 10 en Offset 6 → envía 24 a DB48.DBW2.
+              </span>
+            </div>
+
+            {/* Resultado del Handshake */}
+            {s7HandshakeResult && (
+              <div className={`p-4 rounded-xl border text-xs space-y-2 font-mono ${
+                s7HandshakeResult.success
+                  ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-200'
+                  : 'bg-rose-950/70 border-rose-500/50 text-rose-200'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <strong className="font-sans font-black flex items-center space-x-1.5">
+                    {s7HandshakeResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <AlertTriangle className="w-4 h-4 text-rose-400" />}
+                    <span>{s7HandshakeResult.success ? 'HANDSHAKE COMPLETADO CON ÉXITO' : 'FALLO EN PROTOCOLO HANDSHAKE'}</span>
+                  </strong>
+                  <span className="text-[11px] font-black bg-black/40 px-2 py-0.5 rounded">{s7HandshakeResult.durationMs} ms</span>
+                </div>
+                <p className="text-[11px] text-slate-200">{s7HandshakeResult.message}</p>
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-700/60 text-[10px]">
+                  <div>Receta enviada: <strong className="text-white">{s7HandshakeResult.sequenceRecipeSent}</strong></div>
+                  <div>Solicitud PLC (Req): <strong className="text-white">{s7HandshakeResult.handshakeReqDetected}</strong></div>
+                  <div>Confirmación PLC (Ack): <strong className="text-white">{s7HandshakeResult.handshakeAckReceived}</strong></div>
+                  <div>Valor Reposo enviado: <strong className="text-cyan-300 font-bold">{s7HandshakeResult.idleValueSent} (en DB48.DBW2)</strong></div>
                 </div>
               </div>
             )}

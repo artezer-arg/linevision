@@ -487,6 +487,44 @@ export const api = {
     return await res.json();
   },
 
+  async readS7Offset6(ip?: string, address?: string, rack?: number, slot?: number) {
+    const params = new URLSearchParams();
+    if (ip) params.append('ip', ip);
+    if (address) params.append('address', address);
+    if (rack !== undefined) params.append('rack', String(rack));
+    if (slot !== undefined) params.append('slot', String(slot));
+    const res = await fetch(`${API_BASE}/api/plc/read-offset6?${params.toString()}`);
+    return await res.json();
+  },
+
+  async setSimOffset6(value: number) {
+    const res = await fetch(`${API_BASE}/api/plc/set-sim-offset6`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value })
+    });
+    return await res.json();
+  },
+
+  async testS7Handshake(params: {
+    ipAddress?: string;
+    recipe?: number;
+    recipeAddress?: string;
+    handshakeAddress?: string;
+    reqValue?: number;
+    ackValue?: number;
+    idleValue?: number;
+    rack?: number;
+    slot?: number;
+  }) {
+    const res = await fetch(`${API_BASE}/api/plc/test-handshake-s7`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+    return await res.json();
+  },
+
   // DATABASE CONFIGURATION & SAFE IDEMPOTENT MIGRATIONS
   async getDatabaseConfig() {
     const res = await fetch(`${API_BASE}/api/database/config`);

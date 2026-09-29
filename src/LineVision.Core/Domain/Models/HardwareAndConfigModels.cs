@@ -234,6 +234,31 @@ public class StationWorkflowConfig
     public string RecipeAddress { get; set; } = "DB48.DBW2";
 
     /// <summary>
+    /// Dirección del bloque de datos y offset para el handshake de receta (ej. DB48.DBW6)
+    /// </summary>
+    public string HandshakeAddress { get; set; } = "DB48.DBW6";
+
+    /// <summary>
+    /// Valor con el que el PLC solicita el envío de receta en Offset 6 (default 20)
+    /// </summary>
+    public short HandshakeReqValue { get; set; } = 20;
+
+    /// <summary>
+    /// Valor con el que el PLC confirma haber recibido y aplicado la receta en Offset 6 (default 10)
+    /// </summary>
+    public short HandshakeAckValue { get; set; } = 10;
+
+    /// <summary>
+    /// Valor de reposo enviado a RecipeAddress (DB48.DBW2) una vez confirmado el 10, hasta la próxima receta (default 24)
+    /// </summary>
+    public short HandshakeIdleValue { get; set; } = 24;
+
+    /// <summary>
+    /// Activa el protocolo de Handshake 20 -> Receta -> 10 -> 24 en DB48
+    /// </summary>
+    public bool EnableRecipeHandshake { get; set; } = true;
+
+    /// <summary>
     /// Dirección del bloque de datos y bit para la confirmación (ej. DB48.DBX4.0)
     /// </summary>
     public string ConfirmationAddress { get; set; } = "DB48.DBX4.0";

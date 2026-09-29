@@ -249,26 +249,57 @@ public class StationOrchestrator : BackgroundService
             await _stateMachine.TriggerAsync(StationTrigger.RecipeLoaded, immediateRecipe, ct);
             await _stateMachine.TriggerAsync(StationTrigger.RecipeSent, null, ct);
 
-            var s7WriteResult = await _plcManager.WriteS7DirectAsync(
-                workflowConfig.PlcIpAddress,
-                workflowConfig.RecipeAddress,
-                recipeInt,
-                workflowConfig.PlcRack,
-                workflowConfig.PlcSlot,
-                ct);
-
-            if (!s7WriteResult.Success)
+            if (workflowConfig.EnableRecipeHandshake)
             {
-                _logger.LogWarning("Siemens S7 write recipe warning ({Err}). Registrado en buffer interno.", s7WriteResult.Message);
+                _logger.LogInformation("STEP 2 [PLC HANDSHAKE]: Iniciando protocolo Handshake en {HsAddr} (Espera {Req} -> Envía {Recipe} a {RecAddr} hasta {Ack} -> Envía {Idle} de reposo)",
+                    workflowConfig.HandshakeAddress, workflowConfig.HandshakeReqValue, recipeInt, workflowConfig.RecipeAddress, workflowConfig.HandshakeAckValue, workflowConfig.HandshakeIdleValue);
+
+                var hsResult = await _plcManager.ExecuteRecipeHandshakeAsync(
+                    workflowConfig.PlcIpAddress,
+                    recipeInt,
+                    workflowConfig.RecipeAddress,
+                    workflowConfig.HandshakeAddress,
+                    workflowConfig.HandshakeReqValue,
+                    workflowConfig.HandshakeAckValue,
+                    workflowConfig.HandshakeIdleValue,
+                    workflowConfig.PlcRack,
+                    workflowConfig.PlcSlot,
+                    maxPollTimeoutMs: 15000,
+                    statusCallback: msg =>
+                    {
+                        activeCycle.PLCStartState = msg;
+                        _stateMachine.AttachActiveCycle(activeCycle);
+                    },
+                    ct: ct);
+
+                activeCycle.Recipe_A = recipeInt;
+                activeCycle.PLCStartState = hsResult.Success ? $"HANDSHAKE_OK ({workflowConfig.HandshakeAckValue}->{workflowConfig.HandshakeIdleValue})" : "HANDSHAKE_TIMEOUT";
+                _stateMachine.AttachActiveCycle(activeCycle);
+            }
+            else
+            {
+                var s7WriteResult = await _plcManager.WriteS7DirectAsync(
+                    workflowConfig.PlcIpAddress,
+                    workflowConfig.RecipeAddress,
+                    recipeInt,
+                    workflowConfig.PlcRack,
+                    workflowConfig.PlcSlot,
+                    ct);
+
+                if (!s7WriteResult.Success)
+                {
+                    _logger.LogWarning("Siemens S7 write recipe warning ({Err}). Registrado en buffer interno.", s7WriteResult.Message);
+                }
+
+                activeCycle.Recipe_A = recipeInt;
+                activeCycle.PLCStartState = "RECIPE_SENT_S7";
+                _stateMachine.AttachActiveCycle(activeCycle);
             }
 
-            activeCycle.Recipe_A = recipeInt;
-            activeCycle.PLCStartState = "RECIPE_SENT_S7";
-            _stateMachine.AttachActiveCycle(activeCycle);
             await _traceability.UpdateCycleStateAsync(cycleId, c =>
             {
                 c.Recipe_A = recipeInt;
-                c.PLCStartState = "RECIPE_SENT_S7";
+                c.PLCStartState = activeCycle.PLCStartState;
             }, ct);
             await _stateMachine.TriggerAsync(StationTrigger.RecipeEchoVerified, null, ct);
         }
@@ -371,26 +402,57 @@ public class StationOrchestrator : BackgroundService
             await _stateMachine.TriggerAsync(StationTrigger.RecipeLoaded, recipe, ct);
             await _stateMachine.TriggerAsync(StationTrigger.RecipeSent, null, ct);
 
-            var s7WriteResult = await _plcManager.WriteS7DirectAsync(
-                workflowConfig.PlcIpAddress,
-                workflowConfig.RecipeAddress,
-                recipeInt,
-                workflowConfig.PlcRack,
-                workflowConfig.PlcSlot,
-                ct);
-
-            if (!s7WriteResult.Success)
+            if (workflowConfig.EnableRecipeHandshake)
             {
-                _logger.LogWarning("Siemens S7 write recipe warning ({Err}). Registrado en buffer interno.", s7WriteResult.Message);
+                _logger.LogInformation("STEP 3 [PLC HANDSHAKE]: Iniciando protocolo Handshake tras Cuna OK en {HsAddr} (Espera {Req} -> Envía {Recipe} a {RecAddr} hasta {Ack} -> Envía {Idle} de reposo)",
+                    workflowConfig.HandshakeAddress, workflowConfig.HandshakeReqValue, recipeInt, workflowConfig.RecipeAddress, workflowConfig.HandshakeAckValue, workflowConfig.HandshakeIdleValue);
+
+                var hsResult = await _plcManager.ExecuteRecipeHandshakeAsync(
+                    workflowConfig.PlcIpAddress,
+                    recipeInt,
+                    workflowConfig.RecipeAddress,
+                    workflowConfig.HandshakeAddress,
+                    workflowConfig.HandshakeReqValue,
+                    workflowConfig.HandshakeAckValue,
+                    workflowConfig.HandshakeIdleValue,
+                    workflowConfig.PlcRack,
+                    workflowConfig.PlcSlot,
+                    maxPollTimeoutMs: 15000,
+                    statusCallback: msg =>
+                    {
+                        activeCycle.PLCStartState = msg;
+                        _stateMachine.AttachActiveCycle(activeCycle);
+                    },
+                    ct: ct);
+
+                activeCycle.Recipe_A = recipeInt;
+                activeCycle.PLCStartState = hsResult.Success ? $"HANDSHAKE_OK ({workflowConfig.HandshakeAckValue}->{workflowConfig.HandshakeIdleValue})" : "HANDSHAKE_TIMEOUT";
+                _stateMachine.AttachActiveCycle(activeCycle);
+            }
+            else
+            {
+                var s7WriteResult = await _plcManager.WriteS7DirectAsync(
+                    workflowConfig.PlcIpAddress,
+                    workflowConfig.RecipeAddress,
+                    recipeInt,
+                    workflowConfig.PlcRack,
+                    workflowConfig.PlcSlot,
+                    ct);
+
+                if (!s7WriteResult.Success)
+                {
+                    _logger.LogWarning("Siemens S7 write recipe warning ({Err}). Registrado en buffer interno.", s7WriteResult.Message);
+                }
+
+                activeCycle.Recipe_A = recipeInt;
+                activeCycle.PLCStartState = "RECIPE_SENT_S7";
+                _stateMachine.AttachActiveCycle(activeCycle);
             }
 
-            activeCycle.Recipe_A = recipeInt;
-            activeCycle.PLCStartState = "RECIPE_SENT_S7";
-            _stateMachine.AttachActiveCycle(activeCycle);
             await _traceability.UpdateCycleStateAsync(cycleId, c =>
             {
                 c.Recipe_A = recipeInt;
-                c.PLCStartState = "RECIPE_SENT_S7";
+                c.PLCStartState = activeCycle.PLCStartState;
             }, ct);
             await _stateMachine.TriggerAsync(StationTrigger.RecipeEchoVerified, null, ct);
         }

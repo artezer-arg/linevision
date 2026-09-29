@@ -170,6 +170,56 @@ public class PLCController : ControllerBase
         }
         return StatusCode(500, result);
     }
+
+    [HttpGet("read-offset6")]
+    public async Task<IActionResult> ReadOffset6([FromQuery] string? ip, [FromQuery] string? address, [FromQuery] int? rack, [FromQuery] int? slot)
+    {
+        string plcIp = string.IsNullOrWhiteSpace(ip) ? _plcManager.CurrentConfig.IPAddress : ip.Trim();
+        string addr = string.IsNullOrWhiteSpace(address) ? "DB48.DBW6" : address.Trim();
+        short r = (short)(rack ?? 0);
+        short s = (short)(slot ?? 1);
+
+        var result = await _plcManager.ReadS7Offset6DirectAsync(plcIp, addr, r, s);
+        return Ok(result);
+    }
+
+    [HttpPost("set-sim-offset6")]
+    public IActionResult SetSimOffset6([FromBody] SetSimOffset6Request request)
+    {
+        if (request == null) return BadRequest();
+        _plcManager.SetSimulatorOffset6(request.Value);
+        return Ok(new { Success = true, Value = request.Value, Message = $"Offset 6 del simulador configurado en {request.Value}" });
+    }
+
+    [HttpPost("test-handshake-s7")]
+    public async Task<IActionResult> TestHandshakeS7([FromBody] TestS7HandshakeRequest request)
+    {
+        if (request == null) return BadRequest(new { Message = "Payload es requerido" });
+
+        string ip = string.IsNullOrWhiteSpace(request.IPAddress) ? _plcManager.CurrentConfig.IPAddress : request.IPAddress.Trim();
+        short recipe = (short)(request.Recipe ?? 15);
+        string recipeAddr = string.IsNullOrWhiteSpace(request.RecipeAddress) ? "DB48.DBW2" : request.RecipeAddress.Trim();
+        string hsAddr = string.IsNullOrWhiteSpace(request.HandshakeAddress) ? "DB48.DBW6" : request.HandshakeAddress.Trim();
+        short reqVal = (short)(request.ReqValue ?? 20);
+        short ackVal = (short)(request.AckValue ?? 10);
+        short idleVal = (short)(request.IdleValue ?? 24);
+        short rack = (short)(request.Rack ?? 0);
+        short slot = (short)(request.Slot ?? 1);
+
+        var result = await _plcManager.ExecuteRecipeHandshakeAsync(
+            ip,
+            recipe,
+            recipeAddr,
+            hsAddr,
+            reqVal,
+            ackVal,
+            idleVal,
+            rack,
+            slot);
+
+        if (result.Success) return Ok(result);
+        return StatusCode(500, result);
+    }
 }
 
 public class SendS7RecipeRequest
@@ -211,4 +261,22 @@ public class ForceStateRequest
     public string State { get; set; } = string.Empty;
     public int? EchoA { get; set; }
     public int? EchoB { get; set; }
+}
+
+public class SetSimOffset6Request
+{
+    public int Value { get; set; } = 20;
+}
+
+public class TestS7HandshakeRequest
+{
+    public string? IPAddress { get; set; }
+    public int? Recipe { get; set; } = 15;
+    public string? RecipeAddress { get; set; } = "DB48.DBW2";
+    public string? HandshakeAddress { get; set; } = "DB48.DBW6";
+    public int? ReqValue { get; set; } = 20;
+    public int? AckValue { get; set; } = 10;
+    public int? IdleValue { get; set; } = 24;
+    public int? Rack { get; set; } = 0;
+    public int? Slot { get; set; } = 1;
 }
