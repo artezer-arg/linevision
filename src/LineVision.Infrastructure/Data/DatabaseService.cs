@@ -967,7 +967,16 @@ public class DatabaseService : IDatabaseService
 
     private void SeedSqliteData(IDbConnection conn)
     {
-        // Seed default station DL02 pointer if empty
+        // Seed default station DL01 and DL02 pointer if empty
+        int dl01Count = conn.ExecuteScalar<int>("SELECT COUNT(1) FROM Puesto WHERE UPPER(Puesto) = 'DL01'");
+        if (dl01Count == 0)
+        {
+            string now = DateTime.UtcNow.ToString("o");
+            conn.Execute(@"
+                INSERT INTO Puesto (Puesto, Puntero_ID_OrdenProduccion, Descripcion, Activo, UltimaActualizacion)
+                VALUES ('DL01', 18, 'Puesto DL01 - Puntero de Secuencia de Línea', 1, @now);", new { now });
+        }
+
         int stationCount = conn.ExecuteScalar<int>("SELECT COUNT(1) FROM Puesto WHERE Puesto = 'DL02'");
         if (stationCount == 0)
         {

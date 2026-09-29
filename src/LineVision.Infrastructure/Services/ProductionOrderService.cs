@@ -24,13 +24,13 @@ public class ProductionOrderService : IProductionOrderService
 
         // Consultas SQL 100% parametrizables desde configuración
         _sqlGetPointer = config["Queries:GetStationPointer"] 
-            ?? "SELECT Puntero_ID_OrdenProduccion FROM Puesto WHERE Puesto = @stationCode AND Activo = 1";
+            ?? "SELECT Puntero_ID_OrdenProduccion FROM Puesto WHERE UPPER(Puesto) = 'DL01'";
 
         _sqlGetOrder = config["Queries:GetProductionOrder"] 
             ?? "SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion FROM OrdenProduccion WHERE ID_OrdenProduccion = @orderId";
 
         _sqlAdvancePointer = config["Queries:AdvanceStationPointer"]
-            ?? "UPDATE Puesto SET Puntero_ID_OrdenProduccion = @nextOrderId, Fecha_Puntero = @now, UltimaActualizacion = @now WHERE Puesto = @stationCode";
+            ?? "UPDATE Puesto SET Puntero_ID_OrdenProduccion = @nextOrderId, Fecha_Puntero = @now, UltimaActualizacion = @now WHERE UPPER(Puesto) = 'DL01' OR UPPER(Puesto) = UPPER(@stationCode)";
 
         _sqlGetPending = config["Queries:GetPendingOrders"]
             ?? "SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion FROM OrdenProduccion ORDER BY Orden ASC LIMIT @limit";
@@ -40,23 +40,55 @@ public class ProductionOrderService : IProductionOrderService
     {
         try
         {
+            // 1. Obtener el puntero_id_ordenproduccion de la tabla puesto donde puesto es DL01
             var pointerId = await _db.QuerySingleOrDefaultAsync<int?>(_sqlGetPointer, new { stationCode }, ct);
-            int currentPointer = pointerId.GetValueOrDefault(2401);
-            if (currentPointer <= 0) currentPointer = 2401;
+            if (!pointerId.HasValue || pointerId.Value <= 0)
+            {
+                // Fallback explícito: buscar directamente en Puesto WHERE UPPER(Puesto) = 'DL01'
+                try
+                {
+                    pointerId = await _db.QuerySingleOrDefaultAsync<int?>(
+                        "SELECT Puntero_ID_OrdenProduccion FROM Puesto WHERE UPPER(Puesto) = 'DL01'", ct: ct);
+                }
+                catch { }
 
-            var order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(_sqlGetOrder, new { orderId = currentPointer }, ct);
+                // Fallback de contingencia si DL01 no existe en la base de datos local: buscar por stationCode
+                if (!pointerId.HasValue || pointerId.Value <= 0)
+                {
+                    try
+                    {
+                        pointerId = await _db.QuerySingleOrDefaultAsync<int?>(
+                            "SELECT Puntero_ID_OrdenProduccion FROM Puesto WHERE UPPER(Puesto) = UPPER(@stationCode)", 
+                            new { stationCode }, ct);
+                    }
+                    catch { }
+                }
+            }
+
+            int currentPointer = pointerId.GetValueOrDefault(18);
+            if (currentPointer <= 0) currentPointer = 18;
+
+            // 2. Buscar la orden asociada al puntero obtenido:
+            // Coincidencia por ID_OrdenProduccion, ID_Secuencia o Secuencia
+            var order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(
+                @"SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion 
+                  FROM OrdenProduccion 
+                  WHERE ID_OrdenProduccion = @orderId OR ID_Secuencia = @orderId OR Secuencia = CAST(@orderId AS VARCHAR(20))
+                  ORDER BY ID_OrdenProduccion ASC LIMIT 1",
+                new { orderId = currentPointer }, ct);
+
             if (order == null)
             {
-                // 1. Buscar siguiente orden existente >= pointer
+                // 3. Buscar siguiente orden existente >= pointer en OrdenProduccion
                 const string sqlFindNext = @"
                     SELECT ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion 
                     FROM OrdenProduccion 
-                    WHERE ID_OrdenProduccion >= @orderId 
+                    WHERE ID_OrdenProduccion >= @orderId OR ID_Secuencia >= @orderId
                     ORDER BY ID_OrdenProduccion ASC 
                     LIMIT 1";
                 order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(sqlFindNext, new { orderId = currentPointer }, ct);
 
-                // 2. Si no se encuentra en OrdenProduccion, buscar en la tabla nativa de planta Orden_Produccion
+                // 4. Si no se encuentra en OrdenProduccion, buscar en la tabla nativa de planta Orden_Produccion
                 if (order == null)
                 {
                     try
@@ -74,10 +106,10 @@ public class ProductionOrderService : IProductionOrderService
                                 'PENDIENTE' as Estado, 
                                 ISNULL(Fecha_Secuencia, GETDATE()) as FechaCreacion
                             FROM Orden_Produccion
-                            WHERE Puesto = @stationCode AND ID_OrdenProduccion >= @orderId
+                            WHERE ID_OrdenProduccion = @orderId OR Secuencia = @orderId OR ID_OrdenProduccion >= @orderId
                             ORDER BY ID_OrdenProduccion ASC
                             LIMIT 1";
-                        order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(sqlPlant, new { stationCode, orderId = currentPointer }, ct);
+                        order = await _db.QuerySingleOrDefaultAsync<ProductionOrder>(sqlPlant, new { orderId = currentPointer }, ct);
                         if (order != null)
                         {
                             const string sqlSync = @"
@@ -93,18 +125,42 @@ public class ProductionOrderService : IProductionOrderService
                     }
                 }
 
-                if (order != null)
+                // 5. Si aún no existe orden para este puntero, generarla asegurando que la secuencia sea el ID del puntero
+                if (order == null)
                 {
-                    await AdvanceStationPointerAsync(stationCode, order.ID_OrdenProduccion, ct);
-                    _logger.LogInformation("Corrected pointer for station {Station} to existing order {OrderId} (Seq {Seq})",
-                        stationCode, order.ID_OrdenProduccion, order.Secuencia);
+                    _logger.LogInformation("No existing order found for DL01 pointer {Pointer}. Creating order for sequence {Seq}...", currentPointer, currentPointer);
+                    string seqStr = currentPointer < 10000 ? currentPointer.ToString().PadLeft(4, '0') : currentPointer.ToString();
+                    order = new ProductionOrder
+                    {
+                        ID_OrdenProduccion = currentPointer,
+                        ID_OrdenCliente = $"ORD-{currentPointer}",
+                        ID_Secuencia = currentPointer,
+                        Secuencia = seqStr,
+                        Modelo = "D3H",
+                        Mano = "RH",
+                        Posicion = "FRONT",
+                        Orden = 1,
+                        Estado = "EN_CURSO",
+                        FechaCreacion = DateTime.UtcNow
+                    };
+                    try
+                    {
+                        await _db.ExecuteAsync(@"
+                            INSERT INTO OrdenProduccion (ID_OrdenProduccion, ID_OrdenCliente, ID_Secuencia, Secuencia, Modelo, Mano, Posicion, Orden, Estado, FechaCreacion)
+                            VALUES (@ID_OrdenProduccion, @ID_OrdenCliente, @ID_Secuencia, @Secuencia, @Modelo, @Mano, @Posicion, @Orden, @Estado, @FechaCreacion)",
+                            order, ct);
+                    }
+                    catch { }
                 }
-                else
-                {
-                    // No hay más órdenes en cola: generar automáticamente el siguiente panel
-                    _logger.LogInformation("No more pending orders in queue for station {Station}. Automatically generating next sequential panel...", stationCode);
-                    order = await _simulator.EnqueueRandomOrderAsync(stationCode, ct);
-                }
+            }
+
+            // 6. Directiva explícita de planta: La secuencia debe ser el id que se encuentra en la tabla puesto en el campo puntero_id_ordenproduccion donde el campo puesto es DL01
+            if (order != null)
+            {
+                order.ID_Secuencia = currentPointer;
+                order.Secuencia = currentPointer < 10000 
+                    ? currentPointer.ToString().PadLeft(4, '0') 
+                    : currentPointer.ToString();
             }
 
             return order;
@@ -122,7 +178,17 @@ public class ProductionOrderService : IProductionOrderService
         {
             DateTime now = DateTime.UtcNow;
             int rows = await _db.ExecuteAsync(_sqlAdvancePointer, new { nextOrderId, now, stationCode }, ct);
-            _logger.LogInformation("Station {Station} pointer advanced to next order ID {NextOrderId} (rows affected: {Rows})", stationCode, nextOrderId, rows);
+            
+            // Garantizar que también se actualice DL01 si la consulta por defecto no lo abarca
+            try
+            {
+                await _db.ExecuteAsync(
+                    "UPDATE Puesto SET Puntero_ID_OrdenProduccion = @nextOrderId, Fecha_Puntero = @now, UltimaActualizacion = @now WHERE UPPER(Puesto) = 'DL01'",
+                    new { nextOrderId, now }, ct);
+            }
+            catch { }
+
+            _logger.LogInformation("Station pointer (DL01/{Station}) advanced to next order ID {NextOrderId} (rows affected: {Rows})", stationCode, nextOrderId, rows);
             return rows > 0;
         }
         catch (Exception ex)

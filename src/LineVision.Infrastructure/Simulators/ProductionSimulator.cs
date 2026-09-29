@@ -88,7 +88,7 @@ public class ProductionSimulator
                 Puntero_ID_OrdenProduccion = @orderId,
                 Fecha_Puntero = @now,
                 UltimaActualizacion = @now 
-            WHERE Puesto = @stationCode";
+            WHERE UPPER(Puesto) = 'DL01' OR UPPER(Puesto) = UPPER(@stationCode)";
 
         await _db.ExecuteAsync(sqlPointer, new { orderId, now = DateTime.UtcNow, stationCode }, ct);
 
@@ -100,7 +100,7 @@ public class ProductionSimulator
 
     public async Task SetStationPointerAsync(string stationCode, int orderId, CancellationToken ct = default)
     {
-        const string sql = "UPDATE Puesto SET Puntero_ID_OrdenProduccion = @orderId, Fecha_Puntero = @now, UltimaActualizacion = @now WHERE Puesto = @stationCode";
+        const string sql = "UPDATE Puesto SET Puntero_ID_OrdenProduccion = @orderId, Fecha_Puntero = @now, UltimaActualizacion = @now WHERE UPPER(Puesto) = 'DL01' OR UPPER(Puesto) = UPPER(@stationCode)";
         await _db.ExecuteAsync(sql, new { orderId, now = DateTime.UtcNow, stationCode }, ct);
         _logger.LogInformation("SIMULATOR: Pointer for station {Station} explicitly set to {OrderId}", stationCode, orderId);
     }
