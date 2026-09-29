@@ -1,7 +1,28 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: dark;
+  color-scheme: light dark;
+  
+  /* Neumorphic / Soft UI design tokens matching reference image */
+  --neo-bg: #e9edf2;
+  --neo-surface: #f1f5f9;
+  --neo-card: #f2f5f9;
+  --neo-border: rgba(255, 255, 255, 0.85);
+  --neo-border-dark: rgba(203, 213, 225, 0.6);
+  --neo-shadow-outer: 6px 6px 14px rgba(166, 178, 196, 0.5), -6px -6px 14px rgba(255, 255, 255, 0.95);
+  --neo-shadow-lg: 8px 8px 20px rgba(160, 173, 192, 0.55), -8px -8px 20px rgba(255, 255, 255, 1);
+  --neo-shadow-sm: 3px 3px 7px rgba(166, 178, 196, 0.45), -3px -3px 7px rgba(255, 255, 255, 0.9);
+  --neo-shadow-inset: inset 3px 3px 6px rgba(166, 178, 196, 0.55), inset -3px -3px 6px rgba(255, 255, 255, 0.95);
+  --neo-shadow-inset-sm: inset 2px 2px 4px rgba(166, 178, 196, 0.5), inset -2px -2px 4px rgba(255, 255, 255, 0.9);
+  --neo-shadow-inset-lg: inset 4px 4px 8px rgba(160, 173, 192, 0.6), inset -4px -4px 8px rgba(255, 255, 255, 1);
+  
+  --neo-blue: #2563eb;
+  --neo-blue-hover: #1d4ed8;
+  --neo-emerald: #059669;
+  --neo-amber: #d97706;
+  --neo-red: #dc2626;
+
+  /* HUD legacy tokens */
   --hud-bg: #141720;
   --hud-card: #1c202b;
   --hud-surface: #232836;
@@ -12,79 +33,160 @@
 
 body {
   margin: 0;
-  background-color: var(--hud-bg);
-  color: #f1f5f9;
+  background-color: var(--neo-bg);
+  color: #1e293b;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   overflow-x: hidden;
   user-select: none;
 }
 
-/* Custom industrial & HUD theme colors */
-.bg-hud-dark {
-  background-color: var(--hud-bg);
-}
-.bg-hud-card {
-  background-color: var(--hud-card);
-}
-.bg-hud-surface {
-  background-color: var(--hud-surface);
-}
-.border-hud {
-  border-color: var(--hud-border);
+/* ======================================================== */
+/* NEUMORPHIC / SOFT UI UTILITY CLASSES                     */
+/* ======================================================== */
+
+.neo-bg {
+  background-color: var(--neo-bg);
 }
 
-.text-hud-orange {
-  color: var(--hud-orange);
-}
-.bg-hud-orange {
-  background-color: var(--hud-orange);
-}
-.border-hud-orange {
-  border-color: var(--hud-orange);
+.neo-card {
+  background: var(--neo-card);
+  box-shadow: var(--neo-shadow-outer);
+  border: 1px solid var(--neo-border);
 }
 
-.text-hud-cyan {
-  color: var(--hud-cyan);
-}
-.bg-hud-cyan {
-  background-color: var(--hud-cyan);
-}
-
-/* Backward compatibility classes */
-.bg-industrial-dark {
-  background-color: var(--hud-bg);
-}
-.bg-industrial-card {
-  background-color: var(--hud-card);
-}
-.border-industrial-border {
-  border-color: var(--hud-border);
+.neo-card-lg {
+  background: var(--neo-card);
+  box-shadow: var(--neo-shadow-lg);
+  border: 1.5px solid var(--neo-border);
 }
 
-/* Custom industrial scrollbars */
+.neo-card-sm {
+  background: var(--neo-card);
+  box-shadow: var(--neo-shadow-sm);
+  border: 1px solid var(--neo-border);
+}
+
+.neo-inset {
+  background: #e2e8f0;
+  box-shadow: var(--neo-shadow-inset);
+  border: 1px solid var(--neo-border-dark);
+}
+
+.neo-inset-subtle {
+  background: #e7ecf3;
+  box-shadow: var(--neo-shadow-inset-sm);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.neo-inset-deep {
+  background: #dbe3ed;
+  box-shadow: var(--neo-shadow-inset-lg);
+  border: 1px solid rgba(200, 212, 228, 0.8);
+}
+
+/* Neumorphic Pill Buttons */
+.neo-btn {
+  background: var(--neo-card);
+  box-shadow: var(--neo-shadow-sm);
+  border: 1px solid var(--neo-border);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  color: #334155;
+}
+
+.neo-btn:hover {
+  box-shadow: var(--neo-shadow-outer);
+  color: #0f172a;
+}
+
+.neo-btn:active, .neo-btn-pressed {
+  box-shadow: var(--neo-shadow-inset-sm) !important;
+  transform: translateY(1px);
+}
+
+.neo-btn-active {
+  background: #ffffff;
+  box-shadow: var(--neo-shadow-outer);
+  border: 1.5px solid #2563eb !important;
+  color: #1e3a8a;
+}
+
+.neo-btn-primary {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  box-shadow: 4px 4px 10px rgba(37, 99, 235, 0.35), -2px -2px 6px rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+}
+
+.neo-btn-primary:hover {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  box-shadow: 5px 5px 14px rgba(37, 99, 235, 0.45);
+}
+
+.neo-btn-primary:active {
+  box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Focus ring matching inspiration image */
+.neo-focus-ring {
+  position: relative;
+}
+.neo-focus-ring::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  bottom: -4px;
+  border-radius: inherit;
+  border: 2px solid #2563eb;
+  pointer-events: none;
+}
+
+/* Circular thumb knob */
+.neo-thumb-knob {
+  box-shadow: 2px 2px 6px rgba(166, 178, 196, 0.6), -2px -2px 6px rgba(255, 255, 255, 0.9);
+  background: #ffffff;
+  border: 1px solid rgba(200, 210, 225, 0.5);
+}
+
+/* Industrial HUD fallback classes */
+.bg-hud-dark { background-color: var(--hud-bg); }
+.bg-hud-card { background-color: var(--hud-card); }
+.bg-hud-surface { background-color: var(--hud-surface); }
+.border-hud { border-color: var(--hud-border); }
+.text-hud-orange { color: var(--hud-orange); }
+.bg-hud-orange { background-color: var(--hud-orange); }
+.border-hud-orange { border-color: var(--hud-orange); }
+.text-hud-cyan { color: var(--hud-cyan); }
+.bg-hud-cyan { background-color: var(--hud-cyan); }
+.bg-industrial-dark { background-color: var(--hud-bg); }
+.bg-industrial-card { background-color: var(--hud-card); }
+.border-industrial-border { border-color: var(--hud-border); }
+
+/* Custom clean scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #141720;
+  background: #e2e8f0;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2c3345;
+  background: #94a3b8;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3d465d;
+  background: #64748b;
 }
 
-/* Stepped ruler ticks */
+/* Stepped ruler ticks matching reference */
 .ruler-tick {
-  width: 1px;
-  background-color: #3b445c;
+  width: 1.5px;
+  background-color: #cbd5e1;
   height: 8px;
 }
 .ruler-tick-tall {
-  width: 1.5px;
+  width: 2px;
   background-color: #64748b;
   height: 14px;
 }

@@ -104,35 +104,35 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-industrial-dark text-slate-100 flex flex-col font-sans select-none">
-      {/* 1. Header de Telemetría Estilo Centro de Comando */}
-      <header className="bg-[#141720] border-b border-[#252c3c] px-4 py-2 flex items-center justify-between shadow-xl">
+    <div className={`min-h-screen ${activeTab === 'OPERATOR' ? 'bg-[#e9edf2] text-slate-800' : 'bg-industrial-dark text-slate-100'} flex flex-col font-sans select-none`}>
+      {/* 1. Header de Telemetría Estilo Soft Neumorphic / Command Center */}
+      <header className="bg-[#edf2f7] border-b border-[#cbd5e1] px-4 py-2.5 flex items-center justify-between shadow-sm">
         {/* Left: Brand Logo & Station Badge */}
         <div className="flex items-center space-x-3">
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[#ff6b35] to-[#ff8c5a] flex items-center justify-center shadow-[0_0_12px_rgba(255,107,53,0.5)]">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#2563eb] to-[#3b82f6] flex items-center justify-center shadow-[3px_3px_8px_rgba(166,178,196,0.6),-3px_-3px_8px_rgba(255,255,255,0.9)]">
               <Crosshair className="w-5 h-5 text-white" />
             </div>
             <div className="flex flex-col">
               <div className="flex items-center space-x-2">
-                <span className="text-sm font-black text-white tracking-wider font-mono">LineVision</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#ff6b35]/20 text-[#ff6b35] border border-[#ff6b35]/40 font-bold font-mono">
+                <span className="text-sm font-black text-slate-800 tracking-wider font-mono">LineVision</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 font-bold font-mono">
                   DL02
                 </span>
               </div>
-              <span className="text-[9px] text-slate-500 font-mono tracking-tight">AI VISION & MES CONTROL</span>
+              <span className="text-[9px] text-slate-500 font-mono tracking-tight font-semibold">AI VISION & MES CONTROL</span>
             </div>
           </div>
         </div>
 
         {/* Center: Capsule Pill Navigation (matching reference image) */}
-        <div className="flex items-center bg-[#1b1f2b] p-1 rounded-2xl border border-[#2b3242] shadow-inner space-x-1">
+        <div className="flex items-center neo-inset p-1 rounded-full space-x-1">
           <button
             onClick={() => setActiveTab('OPERATOR')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-2 transition cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center space-x-2 transition cursor-pointer ${
               activeTab === 'OPERATOR'
-                ? 'bg-white text-slate-900 shadow-lg font-black'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-[#f1f5f9] text-[#2563eb] shadow-[3px_3px_6px_rgba(166,178,196,0.5),-3px_-3px_6px_rgba(255,255,255,0.9)] font-black'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
             }`}
           >
             <Monitor className="w-3.5 h-3.5" />
@@ -141,10 +141,10 @@ export const App: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('CALIBRATION')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
               activeTab === 'CALIBRATION'
-                ? 'bg-white text-slate-900 shadow-lg font-black'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-[#f1f5f9] text-[#2563eb] shadow-[3px_3px_6px_rgba(166,178,196,0.5),-3px_-3px_6px_rgba(255,255,255,0.9)] font-black'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
             }`}
           >
             <Crosshair className="w-3.5 h-3.5" />
@@ -153,10 +153,10 @@ export const App: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('PLC_COMM')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
               activeTab === 'PLC_COMM'
-                ? 'bg-white text-slate-900 shadow-lg font-black'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-[#f1f5f9] text-[#2563eb] shadow-[3px_3px_6px_rgba(166,178,196,0.5),-3px_-3px_6px_rgba(255,255,255,0.9)] font-black'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
             }`}
           >
             <Radio className="w-3.5 h-3.5" />
@@ -165,10 +165,10 @@ export const App: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('DATABASE')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
               activeTab === 'DATABASE'
-                ? 'bg-white text-slate-900 shadow-lg font-black'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-[#f1f5f9] text-[#2563eb] shadow-[3px_3px_6px_rgba(166,178,196,0.5),-3px_-3px_6px_rgba(255,255,255,0.9)] font-black'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
             }`}
           >
             <Database className="w-3.5 h-3.5" />
@@ -177,10 +177,10 @@ export const App: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('TECHNICAL')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
               activeTab === 'TECHNICAL'
-                ? 'bg-white text-slate-900 shadow-lg font-black'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-[#f1f5f9] text-[#2563eb] shadow-[3px_3px_6px_rgba(166,178,196,0.5),-3px_-3px_6px_rgba(255,255,255,0.9)] font-black'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
             }`}
           >
             <Cpu className="w-3.5 h-3.5" />
@@ -189,10 +189,10 @@ export const App: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('SIMULATORS')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
               activeTab === 'SIMULATORS'
-                ? 'bg-white text-slate-900 shadow-lg font-black'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-[#f1f5f9] text-[#2563eb] shadow-[3px_3px_6px_rgba(166,178,196,0.5),-3px_-3px_6px_rgba(255,255,255,0.9)] font-black'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
@@ -201,10 +201,10 @@ export const App: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('MAINTENANCE')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
               activeTab === 'MAINTENANCE'
-                ? 'bg-white text-slate-900 shadow-lg font-black'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-[#f1f5f9] text-[#2563eb] shadow-[3px_3px_6px_rgba(166,178,196,0.5),-3px_-3px_6px_rgba(255,255,255,0.9)] font-black'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
             }`}
           >
             <Wrench className="w-3.5 h-3.5" />
@@ -213,10 +213,10 @@ export const App: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('HISTORY')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
               activeTab === 'HISTORY'
-                ? 'bg-white text-slate-900 shadow-lg font-black'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-[#f1f5f9] text-[#2563eb] shadow-[3px_3px_6px_rgba(166,178,196,0.5),-3px_-3px_6px_rgba(255,255,255,0.9)] font-black'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
             }`}
           >
             <History className="w-3.5 h-3.5" />
@@ -227,42 +227,42 @@ export const App: React.FC = () => {
         {/* Right: Telemetry Status Badges */}
         <div className="flex items-center space-x-2.5">
           {/* DB Status Pill */}
-          <div className="px-2.5 py-1 rounded-xl bg-[#1b1f2b] border border-[#2b3242] text-xs font-mono flex items-center space-x-1.5">
-            <span className={`w-2 h-2 rounded-full ${health?.databaseConnected ? 'bg-[#00e5a3] shadow-[0_0_8px_#00e5a3]' : 'bg-red-500'}`}></span>
-            <span className="text-slate-300 font-semibold">TB-L</span>
+          <div className="px-3 py-1 rounded-full neo-card text-xs font-mono flex items-center space-x-1.5">
+            <span className={`w-2 h-2 rounded-full ${health?.databaseConnected ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-rose-500'}`}></span>
+            <span className="text-slate-700 font-bold">TB-L</span>
           </div>
 
           {/* PLC Status Pill */}
-          <div className="px-2.5 py-1 rounded-xl bg-[#1b1f2b] border border-[#2b3242] text-xs font-mono flex items-center space-x-1.5">
-            <span className={`w-2 h-2 rounded-full ${health?.plcConnected ? 'bg-[#00e5a3] shadow-[0_0_8px_#00e5a3]' : 'bg-red-500'}`}></span>
-            <span className="text-slate-300 font-semibold">PLC S7</span>
+          <div className="px-3 py-1 rounded-full neo-card text-xs font-mono flex items-center space-x-1.5">
+            <span className={`w-2 h-2 rounded-full ${health?.plcConnected ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-rose-500'}`}></span>
+            <span className="text-slate-700 font-bold">PLC S7</span>
           </div>
 
           {/* Auto-Run Ongoing Pill */}
           <button
             onClick={handleToggleAutoRun}
-            className={`px-3 py-1 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border transition cursor-pointer ${
+            className={`px-3 py-1 rounded-full text-xs font-mono font-bold flex items-center space-x-1.5 border transition cursor-pointer ${
               autoRun
-                ? 'bg-[#00e5a3]/15 border-[#00e5a3]/40 text-[#00e5a3] shadow-[0_0_10px_rgba(0,229,163,0.3)]'
-                : 'bg-slate-800 border-slate-700 text-slate-400'
+                ? 'bg-blue-600 text-white border-blue-500 shadow-[0_0_12px_rgba(37,99,235,0.4)]'
+                : 'neo-card text-slate-500 border-slate-300'
             }`}
           >
-            <span className={`w-1.5 h-1.5 rounded-full ${autoRun ? 'bg-[#00e5a3] animate-ping' : 'bg-slate-500'}`}></span>
+            <span className={`w-2 h-2 rounded-full ${autoRun ? 'bg-white animate-ping' : 'bg-slate-400'}`}></span>
             <span>{autoRun ? 'Ongoing • AUTO' : 'Pausado • MAN'}</span>
           </button>
 
           {/* Digital Clock */}
-          <div className="px-3 py-1 rounded-xl bg-[#1b1f2b] border border-[#2b3242] text-xs font-mono font-black text-white shadow-inner">
+          <div className="px-3 py-1 rounded-full neo-inset text-xs font-mono font-black text-slate-800">
             {currentTime || '11:43 AM'}
           </div>
 
           {/* User Button */}
           <button
             onClick={() => setShowLoginModal(true)}
-            className="p-1.5 rounded-xl bg-[#1b1f2b] hover:bg-[#252c3c] border border-[#2b3242] text-slate-300 hover:text-white transition cursor-pointer"
+            className="p-1.5 rounded-full neo-card text-slate-600 hover:text-blue-600 transition cursor-pointer"
             title={`Sesión: ${user.displayName} (${user.role})`}
           >
-            <UserCheck className="w-4 h-4 text-cyan-400" />
+            <UserCheck className="w-4 h-4 text-blue-600" />
           </button>
         </div>
       </header>
