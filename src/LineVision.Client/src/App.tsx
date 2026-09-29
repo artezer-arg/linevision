@@ -12,7 +12,7 @@ import { CalibrationView } from './components/CalibrationView';
 import { PLCCommunicationView } from './components/PLCCommunicationView';
 import { DatabaseConfigView } from './components/DatabaseConfigView';
 import { TelemetryOperatorView } from './components/TelemetryOperatorView';
-import { Monitor, Cpu, Sliders, Wrench, History, UserCheck, Shield, Crosshair, Radio, Database } from 'lucide-react';
+import { Monitor, Cpu, Sliders, Wrench, History, UserCheck, Shield, Crosshair, Radio, Database, Video } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [stationState, setStationState] = useState<StationState>('WAITING_ORDER');
@@ -22,7 +22,7 @@ export const App: React.FC = () => {
   const [frames, setFrames] = useState<Record<string, string>>({});
   const [health, setHealth] = useState<StationHealthStatus | null>(null);
   const [autoRun, setAutoRun] = useState(true);
-  const [activeTab, setActiveTab] = useState<'OPERATOR' | 'CALIBRATION' | 'PLC_COMM' | 'DATABASE' | 'TECHNICAL' | 'SIMULATORS' | 'MAINTENANCE' | 'HISTORY'>('OPERATOR');
+  const [activeTab, setActiveTab] = useState<'OPERATOR' | 'CALIBRATION' | 'CAMERAS' | 'PLC_COMM' | 'DATABASE' | 'TECHNICAL' | 'SIMULATORS' | 'MAINTENANCE' | 'HISTORY'>('OPERATOR');
   const [currentTime, setCurrentTime] = useState<string>('');
   const [user, setUser] = useState<UserSession>({
     username: 'operator',
@@ -149,6 +149,18 @@ export const App: React.FC = () => {
           >
             <Crosshair className="w-3.5 h-3.5" />
             <span>Calibración</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('CAMERAS')}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
+              activeTab === 'CAMERAS'
+                ? 'bg-[#f1f5f9] text-[#2563eb] shadow-[3px_3px_6px_rgba(166,178,196,0.5),-3px_-3px_6px_rgba(255,255,255,0.9)] font-black'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
+            }`}
+          >
+            <Video className="w-3.5 h-3.5" />
+            <span>Cámaras</span>
           </button>
 
           <button
@@ -287,6 +299,7 @@ export const App: React.FC = () => {
           />
         )}
         {activeTab === 'CALIBRATION' && <CalibrationView frames={frames} />}
+        {activeTab === 'CAMERAS' && <CameraDisplay frames={frames} />}
         {activeTab === 'PLC_COMM' && (
           <PLCCommunicationView
             workflowConfig={workflowConfig}

@@ -37,7 +37,8 @@ import {
   Radio,
   SlidersHorizontal,
   Info,
-  AlertTriangle
+  AlertTriangle,
+  Settings
 } from 'lucide-react';
 
 interface Props {
@@ -53,7 +54,7 @@ interface Props {
   onTriggerStep: () => void;
   onReset: () => void;
   onEmergencyStop: () => void;
-  onOpenTab: (tab: 'CALIBRATION' | 'PLC_COMM' | 'DATABASE' | 'TECHNICAL' | 'SIMULATORS' | 'MAINTENANCE' | 'HISTORY') => void;
+  onOpenTab: (tab: 'CALIBRATION' | 'CAMERAS' | 'PLC_COMM' | 'DATABASE' | 'TECHNICAL' | 'SIMULATORS' | 'MAINTENANCE' | 'HISTORY') => void;
 }
 
 export const TelemetryOperatorView: React.FC<Props> = ({
@@ -471,6 +472,14 @@ export const TelemetryOperatorView: React.FC<Props> = ({
                   }`}
                 >
                   PANEL INF (CAM_PANEL_02)
+                </button>
+                <button
+                  onClick={() => onOpenTab('CAMERAS')}
+                  className="px-2.5 py-1.5 rounded-full text-xs font-bold text-slate-500 hover:text-blue-700 hover:bg-white/80 transition cursor-pointer flex items-center gap-1"
+                  title="Configurar orígenes físicos de cámaras USB / Simulador"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline text-[11px]">Elegir Origen</span>
                 </button>
               </div>
 
