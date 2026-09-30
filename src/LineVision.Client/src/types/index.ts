@@ -333,6 +333,9 @@ export interface StationWorkflowConfig {
   handshakeAckValue?: number;
   handshakeIdleValue?: number;
   enableRecipeHandshake?: boolean;
+  specialDualRecipeModels?: string;
+  specialSecondRecipeValue?: number;
+  enableDualHandshakeForSpecialModels?: boolean;
   confirmationAddress: string;
   sendConfirmation: boolean;
   recipeTiming?: 'AFTER_ORDER_DETECTED' | 'AFTER_CRADLE_OK';

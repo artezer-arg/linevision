@@ -848,7 +848,8 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
                   </div>
 
                   <p className="text-[11px] text-slate-300 leading-relaxed">
-                    Envía y mantiene <strong>{workflowConfig.handshakeIdleValue ?? 24}</strong> de reposo en <strong>{workflowConfig.recipeAddress || 'DB48.DBW2'}</strong> hasta recibir <strong>{workflowConfig.handshakeReqValue ?? 20}</strong> en <strong>{workflowConfig.handshakeAddress || 'DB48.DBW6'}</strong>. Al recibir <strong>{workflowConfig.handshakeReqValue ?? 20}</strong>, transmite la receta de la secuencia hasta detectar <strong>{workflowConfig.handshakeAckValue ?? 10}</strong>, momento en el cual vuelve a escribir <strong>{workflowConfig.handshakeIdleValue ?? 24}</strong> de reposo.
+                    <strong>Modelos estándar (ej. D3L)</strong>: Al recibir <strong>{workflowConfig.handshakeReqValue ?? 20}</strong> en {workflowConfig.handshakeAddress || 'DB48.DBW6'}, transmite la receta de la secuencia a {workflowConfig.recipeAddress || 'DB48.DBW2'} hasta confirmación <strong>{workflowConfig.handshakeAckValue ?? 10}</strong> (sin enviar receta 24).<br />
+                    <strong>Modelos D1H (Doble Handshake)</strong>: Tras confirmar la primera receta con {workflowConfig.handshakeAckValue ?? 10}, espera una segunda solicitud <strong>{workflowConfig.handshakeReqValue ?? 20}</strong> para transmitir la segunda receta con valor <strong>{workflowConfig.specialSecondRecipeValue ?? 24}</strong> hasta confirmación <strong>{workflowConfig.handshakeAckValue ?? 10}</strong>.
                   </p>
 
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-1">
@@ -880,14 +881,36 @@ export const PLCCommunicationView: React.FC<Props> = ({ workflowConfig: initialW
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-slate-300 block mb-1">Valor de Reposo (Idle)</label>
+                      <label className="text-[10px] font-bold text-slate-300 block mb-1">Modelos Doble Receta</label>
                       <input
-                        type="number"
-                        value={workflowConfig.handshakeIdleValue ?? 24}
-                        onChange={e => setWorkflowConfig(prev => ({ ...prev, handshakeIdleValue: parseInt(e.target.value) || 24 }))}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-emerald-400 font-mono font-bold"
+                        type="text"
+                        value={workflowConfig.specialDualRecipeModels || 'D1H'}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, specialDualRecipeModels: e.target.value }))}
+                        placeholder="D1H"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-amber-400 font-mono font-bold"
                       />
                     </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between pt-2 border-t border-cyan-900/40 text-[11px] gap-2">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-slate-300 font-bold">Segunda Receta para D1H:</span>
+                      <input
+                        type="number"
+                        value={workflowConfig.specialSecondRecipeValue ?? 24}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, specialSecondRecipeValue: parseInt(e.target.value) || 24 }))}
+                        className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-emerald-400 font-mono font-bold"
+                      />
+                    </div>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={workflowConfig.enableDualHandshakeForSpecialModels ?? true}
+                        onChange={e => setWorkflowConfig(prev => ({ ...prev, enableDualHandshakeForSpecialModels: e.target.checked }))}
+                        className="rounded border-slate-700 text-cyan-600 focus:ring-0"
+                      />
+                      <span className="text-xs text-slate-300">Activar Doble Handshake para D1H</span>
+                    </label>
                   </div>
                 </div>
               </div>

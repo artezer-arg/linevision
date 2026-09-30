@@ -212,6 +212,9 @@ public class PLCController : ControllerBase
         short idleVal = (short)(request.IdleValue ?? 24);
         short rack = (short)(request.Rack ?? 0);
         short slot = (short)(request.Slot ?? 1);
+        int timeoutMs = request.TimeoutMs ?? 30000;
+        bool isDual = request.IsDualRecipeModel ?? (!string.IsNullOrWhiteSpace(request.Modelo) && request.Modelo.Contains("D1H", StringComparison.OrdinalIgnoreCase));
+        short secondRecipe = (short)(request.SecondRecipe ?? 24);
 
         var result = await _plcManager.ExecuteRecipeHandshakeAsync(
             ip,
@@ -222,7 +225,10 @@ public class PLCController : ControllerBase
             ackVal,
             idleVal,
             rack,
-            slot);
+            slot,
+            maxPollTimeoutMs: timeoutMs,
+            isDualRecipeModel: isDual,
+            secondRecipe: secondRecipe);
 
         if (result.Success) return Ok(result);
         return StatusCode(500, result);
@@ -286,4 +292,8 @@ public class TestS7HandshakeRequest
     public int? IdleValue { get; set; } = 24;
     public int? Rack { get; set; } = 0;
     public int? Slot { get; set; } = 1;
+    public int? TimeoutMs { get; set; } = 30000;
+    public string? Modelo { get; set; }
+    public bool? IsDualRecipeModel { get; set; }
+    public int? SecondRecipe { get; set; } = 24;
 }

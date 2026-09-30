@@ -254,9 +254,24 @@ public class StationWorkflowConfig
     public short HandshakeIdleValue { get; set; } = 24;
 
     /// <summary>
-    /// Activa el protocolo de Handshake 20 -> Receta -> 10 -> 24 en DB48
+    /// Activa el protocolo de Handshake 20 -> Receta -> 10 en DB48
     /// </summary>
     public bool EnableRecipeHandshake { get; set; } = true;
+
+    /// <summary>
+    /// Modelos especiales que requieren enviar una segunda receta con valor 24 tras confirmar la primera (ej. D1H)
+    /// </summary>
+    public string SpecialDualRecipeModels { get; set; } = "D1H";
+
+    /// <summary>
+    /// Valor de la segunda receta para los modelos especiales (default 24)
+    /// </summary>
+    public short SpecialSecondRecipeValue { get; set; } = 24;
+
+    /// <summary>
+    /// Habilita el doble handshake (20 -> Receta 1 -> 10, luego 20 -> Receta 2 [24] -> 10) para modelos especiales
+    /// </summary>
+    public bool EnableDualHandshakeForSpecialModels { get; set; } = true;
 
     /// <summary>
     /// Dirección del bloque de datos y bit para la confirmación (ej. DB48.DBX4.0)

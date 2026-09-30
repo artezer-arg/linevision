@@ -304,8 +304,14 @@ public class StationOrchestrator : BackgroundService
 
             if (workflowConfig.EnableRecipeHandshake)
             {
-                _logger.LogInformation("STEP 2 [PLC HANDSHAKE]: Iniciando protocolo Handshake en {HsAddr} (Manteniendo reposo {Idle} en {RecAddr} hasta solicitud {Req} -> Transmite receta {Recipe} hasta {Ack} -> Reposo final {Idle})",
-                    workflowConfig.HandshakeAddress, workflowConfig.HandshakeIdleValue, workflowConfig.RecipeAddress, workflowConfig.HandshakeReqValue, recipeInt, workflowConfig.HandshakeAckValue, workflowConfig.HandshakeIdleValue);
+                bool isDualModel = workflowConfig.EnableDualHandshakeForSpecialModels &&
+                    !string.IsNullOrWhiteSpace(order.Modelo) &&
+                    (order.Modelo.Contains("D1H", StringComparison.OrdinalIgnoreCase) ||
+                     (workflowConfig.SpecialDualRecipeModels?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                      .Any(m => order.Modelo.Contains(m, StringComparison.OrdinalIgnoreCase)) ?? false));
+
+                _logger.LogInformation("STEP 2 [PLC HANDSHAKE]: Iniciando protocolo Handshake en {HsAddr} (Modelo={Model}, EsD1HDual={IsDual})",
+                    workflowConfig.HandshakeAddress, order.Modelo, isDualModel);
 
                 var hsResult = await _plcManager.ExecuteRecipeHandshakeAsync(
                     workflowConfig.PlcIpAddress,
@@ -323,6 +329,8 @@ public class StationOrchestrator : BackgroundService
                         activeCycle.PLCStartState = msg;
                         _stateMachine.AttachActiveCycle(activeCycle);
                     },
+                    isDualRecipeModel: isDualModel,
+                    secondRecipe: workflowConfig.SpecialSecondRecipeValue,
                     ct: ct);
 
                 if (!hsResult.Success)
@@ -334,7 +342,10 @@ public class StationOrchestrator : BackgroundService
                 }
 
                 activeCycle.Recipe_A = recipeInt;
-                activeCycle.PLCStartState = $"HANDSHAKE_OK ({workflowConfig.HandshakeAckValue}->{workflowConfig.HandshakeIdleValue})";
+                if (isDualModel) activeCycle.Recipe_B = workflowConfig.SpecialSecondRecipeValue;
+                activeCycle.PLCStartState = isDualModel
+                    ? $"D1H_DUAL_OK (R1={recipeInt} -> R2={workflowConfig.SpecialSecondRecipeValue})"
+                    : $"HANDSHAKE_OK (Receta={recipeInt})";
                 _stateMachine.AttachActiveCycle(activeCycle);
             }
             else
@@ -473,8 +484,14 @@ public class StationOrchestrator : BackgroundService
 
             if (workflowConfig.EnableRecipeHandshake)
             {
-                _logger.LogInformation("STEP 3 [PLC HANDSHAKE]: Iniciando protocolo Handshake tras Cuna OK en {HsAddr} (Manteniendo reposo {Idle} en {RecAddr} hasta solicitud {Req} -> Transmite receta {Recipe} hasta {Ack} -> Reposo final {Idle})",
-                    workflowConfig.HandshakeAddress, workflowConfig.HandshakeIdleValue, workflowConfig.RecipeAddress, workflowConfig.HandshakeReqValue, recipeInt, workflowConfig.HandshakeAckValue, workflowConfig.HandshakeIdleValue);
+                bool isDualModel = workflowConfig.EnableDualHandshakeForSpecialModels &&
+                    !string.IsNullOrWhiteSpace(order.Modelo) &&
+                    (order.Modelo.Contains("D1H", StringComparison.OrdinalIgnoreCase) ||
+                     (workflowConfig.SpecialDualRecipeModels?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                      .Any(m => order.Modelo.Contains(m, StringComparison.OrdinalIgnoreCase)) ?? false));
+
+                _logger.LogInformation("STEP 3 [PLC HANDSHAKE]: Iniciando protocolo Handshake tras Cuna OK en {HsAddr} (Modelo={Model}, EsD1HDual={IsDual})",
+                    workflowConfig.HandshakeAddress, order.Modelo, isDualModel);
 
                 var hsResult = await _plcManager.ExecuteRecipeHandshakeAsync(
                     workflowConfig.PlcIpAddress,
@@ -492,6 +509,8 @@ public class StationOrchestrator : BackgroundService
                         activeCycle.PLCStartState = msg;
                         _stateMachine.AttachActiveCycle(activeCycle);
                     },
+                    isDualRecipeModel: isDualModel,
+                    secondRecipe: workflowConfig.SpecialSecondRecipeValue,
                     ct: ct);
 
                 if (!hsResult.Success)
@@ -503,7 +522,10 @@ public class StationOrchestrator : BackgroundService
                 }
 
                 activeCycle.Recipe_A = recipeInt;
-                activeCycle.PLCStartState = $"HANDSHAKE_OK ({workflowConfig.HandshakeAckValue}->{workflowConfig.HandshakeIdleValue})";
+                if (isDualModel) activeCycle.Recipe_B = workflowConfig.SpecialSecondRecipeValue;
+                activeCycle.PLCStartState = isDualModel
+                    ? $"D1H_DUAL_OK (R1={recipeInt} -> R2={workflowConfig.SpecialSecondRecipeValue})"
+                    : $"HANDSHAKE_OK (Receta={recipeInt})";
                 _stateMachine.AttachActiveCycle(activeCycle);
             }
             else

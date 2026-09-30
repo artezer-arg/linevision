@@ -803,20 +803,22 @@ public class PLCManager : IPLCService
         short idleValue = 24,
         short rack = 0,
         short slot = 1,
-        int maxPollTimeoutMs = 30000,
+        int maxPollTimeoutMs = 0,
         Action<string>? statusCallback = null,
+        bool isDualRecipeModel = false,
+        short secondRecipe = 24,
         CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
         string cleanRecipeAddr = recipeAddress.Split(' ')[0].Trim();
         string cleanHandshakeAddr = handshakeAddress.Split(' ')[0].Trim();
 
-        _logger.LogInformation("PLC HANDSHAKE INICIADO: Receta={Recipe}, RecAddress={RecAddr}, HandshakeAddr={HsAddr}, ReqVal={ReqVal}, AckVal={AckVal}, IdleVal={IdleVal}",
-            sequenceRecipe, cleanRecipeAddr, cleanHandshakeAddr, reqValue, ackValue, idleValue);
+        _logger.LogInformation("PLC HANDSHAKE INICIADO: Receta={Recipe}, RecAddress={RecAddr}, HandshakeAddr={HsAddr}, ReqVal={ReqVal}, AckVal={AckVal}, EsDualD1H={IsDual}, Receta2={Rec2}",
+            sequenceRecipe, cleanRecipeAddr, cleanHandshakeAddr, reqValue, ackValue, isDualRecipeModel, secondRecipe);
 
         if (string.Equals(_config.Protocol, "SIMULATOR", StringComparison.OrdinalIgnoreCase))
         {
-            return await ExecuteSimulatedHandshakeAsync(sequenceRecipe, cleanRecipeAddr, cleanHandshakeAddr, reqValue, ackValue, idleValue, statusCallback, ct);
+            return await ExecuteSimulatedHandshakeAsync(sequenceRecipe, cleanRecipeAddr, cleanHandshakeAddr, reqValue, ackValue, isDualRecipeModel, secondRecipe, statusCallback, ct);
         }
 
         try
@@ -828,7 +830,7 @@ public class PLCManager : IPLCService
                 string errMsg = $"No se pudo conectar al PLC Siemens S7 en {ip}:102 (Rack={rack}, Slot={slot})";
                 _logger.LogWarning("Siemens S7 Handshake: {Err}. Derivando a simulación local.", errMsg);
                 statusCallback?.Invoke(errMsg + " -> Ejecutando en simulador");
-                return await ExecuteSimulatedHandshakeAsync(sequenceRecipe, cleanRecipeAddr, cleanHandshakeAddr, reqValue, ackValue, idleValue, statusCallback, ct);
+                return await ExecuteSimulatedHandshakeAsync(sequenceRecipe, cleanRecipeAddr, cleanHandshakeAddr, reqValue, ackValue, isDualRecipeModel, secondRecipe, statusCallback, ct);
             }
 
             async Task<int> ReadHandshakeRawAsync()
@@ -862,28 +864,18 @@ public class PLCManager : IPLCService
             }
 
             // =========================================================================
-            // PASO 1: ENVIAR 24 (REPOSO) EN DBW2 HASTA DETECTAR reqValue (20) EN OFFSET 6
+            // FASE 1: ESPERAR SOLICITUD DEL PLC (20) Y TRANSMITIR RECETA PRIMARIA HASTA 10
             // =========================================================================
-            _logger.LogInformation("PLC HANDSHAKE PASO 1: Transmitiendo valor de reposo inicial {Idle} a {RecAddr} y monitoreando {HsAddr} (Esperando solicitud {Req})...",
-                idleValue, cleanRecipeAddr, cleanHandshakeAddr, reqValue);
-
-            // Escribir de inmediato el valor de reposo (24) en DB48.DBW2
-            await plc.WriteAsync(cleanRecipeAddr, idleValue);
-
             int currentVal = await ReadHandshakeRawAsync();
-            statusCallback?.Invoke($"Paso 2.1: Reposo {idleValue} activo en {cleanRecipeAddr}. PLC {cleanHandshakeAddr}={currentVal}. Esperando solicitud {reqValue}...");
+            statusCallback?.Invoke($"Paso 2.1: Monitoreando {cleanHandshakeAddr} (Actual: {currentVal}). Esperando solicitud {reqValue} del PLC para receta {sequenceRecipe}...");
 
             var reqSw = Stopwatch.StartNew();
-            int idleWriteTick = 0;
-
             while (currentVal != reqValue && !ct.IsCancellationRequested)
             {
                 if (maxPollTimeoutMs > 0 && reqSw.ElapsedMilliseconds >= maxPollTimeoutMs)
                 {
-                    // Si venció el tiempo de espera, NUNCA enviar la receta. Mantener 24 y abortar con error.
-                    await plc.WriteAsync(cleanRecipeAddr, idleValue);
                     sw.Stop();
-                    string timeoutMsg = $"Timeout ({maxPollTimeoutMs}ms) esperando solicitud ({reqValue}) del PLC en {cleanHandshakeAddr}. Valor actual: {currentVal}. Se mantuvo reposo {idleValue} en {cleanRecipeAddr} (NO se transmitió receta).";
+                    string timeoutMsg = $"Timeout ({maxPollTimeoutMs}ms) esperando solicitud ({reqValue}) del PLC en {cleanHandshakeAddr}. Valor actual: {currentVal}.";
                     _logger.LogWarning("{Msg}", timeoutMsg);
                     statusCallback?.Invoke(timeoutMsg);
                     return new S7HandshakeResult
@@ -895,76 +887,79 @@ public class PLCManager : IPLCService
                         SequenceRecipeSent = sequenceRecipe,
                         HandshakeReqDetected = currentVal,
                         HandshakeAckReceived = 0,
-                        IdleValueSent = idleValue,
                         DurationMs = (int)sw.ElapsedMilliseconds,
                         Message = timeoutMsg
                     };
                 }
 
-                // Reforzar valor 24 en DBW2 periódicamente cada ~500ms
-                if (++idleWriteTick % 5 == 0)
-                {
-                    await plc.WriteAsync(cleanRecipeAddr, idleValue);
-                }
-
-                statusCallback?.Invoke($"PLC {cleanHandshakeAddr}={currentVal}. Manteniendo {idleValue} en {cleanRecipeAddr}. Esperando {reqValue} para enviar receta {sequenceRecipe}...");
+                statusCallback?.Invoke($"PLC {cleanHandshakeAddr}={currentVal}. Esperando solicitud {reqValue} para enviar receta {sequenceRecipe}...");
                 await Task.Delay(100, ct);
                 currentVal = await ReadHandshakeRawAsync();
             }
 
             if (ct.IsCancellationRequested)
             {
-                await plc.WriteAsync(cleanRecipeAddr, idleValue);
                 return new S7HandshakeResult
                 {
                     Success = false,
-                    Message = "Handshake cancelado por interrupción del ciclo. Se mantuvo reposo 24."
+                    Message = "Handshake cancelado antes de recibir solicitud del PLC."
                 };
             }
 
-            // =========================================================================
-            // PASO 2: SOLICITUD 20 DETECTADA. TRANSMITIR RECETA DE SECUENCIA (EJ. 15) HASTA DETECTAR 10
-            // =========================================================================
-            int reqDetected = currentVal; // Garantizado == reqValue (20)
-            _logger.LogInformation("PLC HANDSHAKE PASO 2: Solicitud {Req} confirmada en {HsAddr}. Transmitiendo receta {Recipe} a {RecAddr}...",
-                reqDetected, cleanHandshakeAddr, sequenceRecipe, cleanRecipeAddr);
+            int reqDetected1 = currentVal; // reqValue (20)
+            _logger.LogInformation("PLC HANDSHAKE FASE 1: Solicitud {Req} confirmada en {HsAddr}. Transmitiendo receta primaria {Recipe} a {RecAddr}...",
+                reqDetected1, cleanHandshakeAddr, sequenceRecipe, cleanRecipeAddr);
 
-            statusCallback?.Invoke($"Paso 2.2: Solicitud {reqValue} detectada. Transmitiendo receta {sequenceRecipe} a {cleanRecipeAddr} hasta confirmación {ackValue}...");
+            statusCallback?.Invoke($"Paso 2.1: Solicitud {reqValue} detectada. Transmitiendo receta primaria {sequenceRecipe} a {cleanRecipeAddr}...");
             await plc.WriteAsync(cleanRecipeAddr, sequenceRecipe);
 
-            var ackSw = Stopwatch.StartNew();
+            var ackSw1 = Stopwatch.StartNew();
             currentVal = await ReadHandshakeRawAsync();
 
             while (currentVal != ackValue && !ct.IsCancellationRequested)
             {
-                if (maxPollTimeoutMs > 0 && ackSw.ElapsedMilliseconds >= maxPollTimeoutMs)
+                if (maxPollTimeoutMs > 0 && ackSw1.ElapsedMilliseconds >= maxPollTimeoutMs)
                 {
                     break;
                 }
 
                 await plc.WriteAsync(cleanRecipeAddr, sequenceRecipe);
-                statusCallback?.Invoke($"Receta {sequenceRecipe} en {cleanRecipeAddr}. Esperando confirmación {cleanHandshakeAddr}=={ackValue} (Actual: {currentVal})...");
+                statusCallback?.Invoke($"Receta primaria {sequenceRecipe} enviada. Esperando confirmación {cleanHandshakeAddr}=={ackValue} (Actual: {currentVal})...");
                 await Task.Delay(100, ct);
                 currentVal = await ReadHandshakeRawAsync();
             }
 
-            // =========================================================================
-            // PASO 3: CONFIRMACIÓN 10 DETECTADA. ESCRIBIR INMEDIATAMENTE 24 DE REPOSO
-            // =========================================================================
-            if (currentVal == ackValue)
+            if (currentVal != ackValue)
             {
-                _logger.LogInformation("PLC HANDSHAKE PASO 3: Confirmación {Ack} detectada en {HsAddr}. Transmitiendo valor de reposo {Idle} a {RecAddr}...",
-                    currentVal, cleanHandshakeAddr, idleValue, cleanRecipeAddr);
-                statusCallback?.Invoke($"Paso 2.3: PLC confirmó ({ackValue}). Escribiendo valor de reposo {idleValue} en {cleanRecipeAddr}...");
-
-                await plc.WriteAsync(cleanRecipeAddr, idleValue);
-                var readIdle = await plc.ReadAsync(cleanRecipeAddr);
-                short verifiedIdle = Convert.ToInt16(readIdle);
-
                 sw.Stop();
-                string msg = $"Handshake Siemens S7 completado: PLC solicitó con {reqDetected}, se transmitió receta {sequenceRecipe}, PLC confirmó con {ackValue}, y se dejó valor de reposo {idleValue} en {cleanRecipeAddr} (Verificado: {verifiedIdle}).";
-                _logger.LogInformation("{Msg}", msg);
-                statusCallback?.Invoke(msg);
+                string timeoutMsg = $"Handshake incompleto: Se transmitió receta primaria {sequenceRecipe}, pero el PLC no respondió con {ackValue} (Último valor en {cleanHandshakeAddr}: {currentVal}).";
+                _logger.LogWarning("{Msg}", timeoutMsg);
+                statusCallback?.Invoke(timeoutMsg);
+                return new S7HandshakeResult
+                {
+                    Success = false,
+                    IPAddress = ip,
+                    HandshakeAddress = cleanHandshakeAddr,
+                    RecipeAddress = cleanRecipeAddr,
+                    SequenceRecipeSent = sequenceRecipe,
+                    HandshakeReqDetected = reqDetected1,
+                    HandshakeAckReceived = currentVal,
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                    Message = timeoutMsg
+                };
+            }
+
+            _logger.LogInformation("PLC HANDSHAKE FASE 1 OK: Receta primaria {Recipe} confirmada por el PLC con {Ack}", sequenceRecipe, currentVal);
+
+            // =========================================================================
+            // CASO A: MODELO ESTÁNDAR (NO D1H) -> FINALIZAR SIN ENVIAR RECETA 24
+            // =========================================================================
+            if (!isDualRecipeModel)
+            {
+                sw.Stop();
+                string msgNormal = $"Handshake Siemens S7 completado: PLC solicitó con {reqDetected1}, se transmitió receta {sequenceRecipe} y PLC confirmó con {currentVal}. (Modelo estándar: NO se envía receta 24).";
+                _logger.LogInformation("{Msg}", msgNormal);
+                statusCallback?.Invoke(msgNormal);
 
                 return new S7HandshakeResult
                 {
@@ -973,23 +968,91 @@ public class PLCManager : IPLCService
                     HandshakeAddress = cleanHandshakeAddr,
                     RecipeAddress = cleanRecipeAddr,
                     SequenceRecipeSent = sequenceRecipe,
-                    HandshakeReqDetected = reqDetected,
+                    HandshakeReqDetected = reqDetected1,
                     HandshakeAckReceived = currentVal,
-                    IdleValueSent = idleValue,
-                    IdleValueVerified = verifiedIdle,
+                    IsDualHandshake = false,
                     DurationMs = (int)sw.ElapsedMilliseconds,
-                    Message = msg
+                    Message = msgNormal
                 };
             }
-            else
+
+            // =========================================================================
+            // CASO B: MODELO D1H (DOBLE HANDSHAKE) -> ESPERAR SEGUNDO 20 Y ENVIAR RECETA 24
+            // =========================================================================
+            statusCallback?.Invoke($"[D1H FASE 2]: Primera receta ({sequenceRecipe}) confirmada. Esperando que el PLC vuelva a solicitar ({reqValue}) para enviar segunda receta ({secondRecipe})...");
+            _logger.LogInformation("PLC HANDSHAKE FASE 2 [D1H]: Esperando que el PLC vuelva a solicitar con {Req} para enviar segunda receta con valor {Second}...", reqValue, secondRecipe);
+
+            // Pequeña espera para permitir que el PLC procese la transición previa
+            await Task.Delay(200, ct);
+            currentVal = await ReadHandshakeRawAsync();
+
+            var reqSw2 = Stopwatch.StartNew();
+            while (currentVal != reqValue && !ct.IsCancellationRequested)
             {
-                // Restaurar reposo por seguridad
-                await plc.WriteAsync(cleanRecipeAddr, idleValue);
+                if (maxPollTimeoutMs > 0 && reqSw2.ElapsedMilliseconds >= maxPollTimeoutMs)
+                {
+                    sw.Stop();
+                    string timeoutMsg = $"[D1H] Timeout esperando segunda solicitud ({reqValue}) del PLC en {cleanHandshakeAddr}. Valor actual: {currentVal}.";
+                    _logger.LogWarning("{Msg}", timeoutMsg);
+                    statusCallback?.Invoke(timeoutMsg);
+                    return new S7HandshakeResult
+                    {
+                        Success = false,
+                        IPAddress = ip,
+                        HandshakeAddress = cleanHandshakeAddr,
+                        RecipeAddress = cleanRecipeAddr,
+                        SequenceRecipeSent = sequenceRecipe,
+                        HandshakeReqDetected = reqDetected1,
+                        HandshakeAckReceived = ackValue,
+                        IsDualHandshake = true,
+                        DurationMs = (int)sw.ElapsedMilliseconds,
+                        Message = timeoutMsg
+                    };
+                }
+
+                statusCallback?.Invoke($"[D1H]: PLC {cleanHandshakeAddr}={currentVal}. Esperando segunda solicitud {reqValue} para enviar receta {secondRecipe}...");
+                await Task.Delay(100, ct);
+                currentVal = await ReadHandshakeRawAsync();
+            }
+
+            if (ct.IsCancellationRequested)
+            {
+                return new S7HandshakeResult
+                {
+                    Success = false,
+                    Message = "Handshake D1H cancelado antes de recibir segunda solicitud."
+                };
+            }
+
+            int reqDetected2 = currentVal; // Segundo reqValue (20)
+            _logger.LogInformation("PLC HANDSHAKE FASE 2 [D1H]: Segunda solicitud {Req} detectada. Transmitiendo receta con valor {Second} a {RecAddr}...",
+                reqDetected2, secondRecipe, cleanRecipeAddr);
+
+            statusCallback?.Invoke($"[D1H]: Segunda solicitud {reqValue} detectada. Transmitiendo segunda receta con valor {secondRecipe} a {cleanRecipeAddr}...");
+            await plc.WriteAsync(cleanRecipeAddr, secondRecipe);
+
+            var ackSw2 = Stopwatch.StartNew();
+            currentVal = await ReadHandshakeRawAsync();
+
+            while (currentVal != ackValue && !ct.IsCancellationRequested)
+            {
+                if (maxPollTimeoutMs > 0 && ackSw2.ElapsedMilliseconds >= maxPollTimeoutMs)
+                {
+                    break;
+                }
+
+                await plc.WriteAsync(cleanRecipeAddr, secondRecipe);
+                statusCallback?.Invoke($"[D1H]: Segunda receta {secondRecipe} enviada. Esperando confirmación {cleanHandshakeAddr}=={ackValue} (Actual: {currentVal})...");
+                await Task.Delay(100, ct);
+                currentVal = await ReadHandshakeRawAsync();
+            }
+
+            if (currentVal != ackValue)
+            {
                 sw.Stop();
-                string timeoutMsg = $"Handshake incompleto: Se transmitió receta {sequenceRecipe}, pero el PLC no respondió con {ackValue} (Último valor en {cleanHandshakeAddr}: {currentVal}). Se restauró reposo {idleValue}.";
+                string timeoutMsg = $"[D1H] Handshake incompleto en segunda receta: Se transmitió {secondRecipe}, pero el PLC no respondió con {ackValue} (Último valor: {currentVal}).";
                 _logger.LogWarning("{Msg}", timeoutMsg);
                 statusCallback?.Invoke(timeoutMsg);
-
                 return new S7HandshakeResult
                 {
                     Success = false,
@@ -997,19 +1060,42 @@ public class PLCManager : IPLCService
                     HandshakeAddress = cleanHandshakeAddr,
                     RecipeAddress = cleanRecipeAddr,
                     SequenceRecipeSent = sequenceRecipe,
-                    HandshakeReqDetected = reqDetected,
-                    HandshakeAckReceived = currentVal,
-                    IdleValueSent = idleValue,
+                    HandshakeReqDetected = reqDetected1,
+                    HandshakeAckReceived = ackValue,
+                    IsDualHandshake = true,
+                    SecondRecipeSent = secondRecipe,
+                    SecondHandshakeAckReceived = currentVal,
                     DurationMs = (int)sw.ElapsedMilliseconds,
                     Message = timeoutMsg
                 };
             }
+
+            sw.Stop();
+            string msgDual = $"Handshake Siemens S7 para D1H completado exitosamente: R1={sequenceRecipe} confirmada con {ackValue} -> R2={secondRecipe} confirmada con {currentVal}.";
+            _logger.LogInformation("{Msg}", msgDual);
+            statusCallback?.Invoke(msgDual);
+
+            return new S7HandshakeResult
+            {
+                Success = true,
+                IPAddress = ip,
+                HandshakeAddress = cleanHandshakeAddr,
+                RecipeAddress = cleanRecipeAddr,
+                SequenceRecipeSent = sequenceRecipe,
+                HandshakeReqDetected = reqDetected1,
+                HandshakeAckReceived = ackValue,
+                IsDualHandshake = true,
+                SecondRecipeSent = secondRecipe,
+                SecondHandshakeAckReceived = currentVal,
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                Message = msgDual
+            };
         }
         catch (Exception ex)
         {
             sw.Stop();
             _logger.LogError(ex, "Excepción durante handshake Siemens S7 en {IP}", ip);
-            return await ExecuteSimulatedHandshakeAsync(sequenceRecipe, cleanRecipeAddr, cleanHandshakeAddr, reqValue, ackValue, idleValue, statusCallback, ct);
+            return await ExecuteSimulatedHandshakeAsync(sequenceRecipe, cleanRecipeAddr, cleanHandshakeAddr, reqValue, ackValue, isDualRecipeModel, secondRecipe, statusCallback, ct);
         }
     }
 
@@ -1019,38 +1105,64 @@ public class PLCManager : IPLCService
         string handshakeAddress,
         short reqValue,
         short ackValue,
-        short idleValue,
+        bool isDualRecipeModel,
+        short secondRecipe,
         Action<string>? statusCallback,
         CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
 
-        // 1. Iniciar con reposo 24 en DBW2
-        statusCallback?.Invoke($"[SIMULADOR] Reposo activo ({recipeAddress} = {idleValue}). Monitoreando {handshakeAddress}...");
-        await _simulator.WriteRecipeAsync(idleValue, idleValue, ct);
-
-        await Task.Delay(200, ct);
-
-        // 2. Simular solicitud del PLC (Offset 6 pasa a 20)
-        statusCallback?.Invoke($"[SIMULADOR] PLC solicitando receta ({handshakeAddress} == {reqValue})...");
+        // 1. Simular solicitud del PLC para receta primaria
+        statusCallback?.Invoke($"[SIMULADOR] PLC solicitando receta primaria ({handshakeAddress} == {reqValue})...");
         _simulator.SetOffset6(reqValue);
 
         await Task.Delay(150, ct);
 
-        // 3. Escribir receta de la secuencia
-        statusCallback?.Invoke($"[SIMULADOR] Transmitiendo receta de orden {sequenceRecipe} a {recipeAddress}...");
+        // 2. Transmitir receta primaria
+        statusCallback?.Invoke($"[SIMULADOR] Transmitiendo receta primaria {sequenceRecipe} a {recipeAddress}...");
         await _simulator.WriteRecipeAsync(sequenceRecipe, sequenceRecipe, ct);
 
-        await Task.Delay(300, ct);
+        await Task.Delay(250, ct);
         _simulator.SetOffset6(ackValue);
-        int ack = _simulator.ReadOffset6();
+        int ack1 = _simulator.ReadOffset6();
+        statusCallback?.Invoke($"[SIMULADOR] Receta {sequenceRecipe} confirmada por PLC ({ack1}).");
 
-        // 4. Confirmación detectada (10), escribir 24 de reposo
-        statusCallback?.Invoke($"[SIMULADOR] Confirmación {ack} recibida. Transmitiendo reposo {idleValue} a {recipeAddress}...");
-        await _simulator.WriteRecipeAsync(idleValue, idleValue, ct);
+        if (!isDualRecipeModel)
+        {
+            sw.Stop();
+            string normalMsg = $"[SIMULADOR] Handshake completado: Solicitud={reqValue} -> Receta={sequenceRecipe} -> Confirmación={ack1} (Modelo estándar, sin receta 24).";
+            return new S7HandshakeResult
+            {
+                Success = true,
+                IPAddress = "127.0.0.1 (SIMULATOR)",
+                HandshakeAddress = handshakeAddress,
+                RecipeAddress = recipeAddress,
+                SequenceRecipeSent = sequenceRecipe,
+                HandshakeReqDetected = reqValue,
+                HandshakeAckReceived = ack1,
+                IsDualHandshake = false,
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                Message = normalMsg
+            };
+        }
+
+        // FASE 2: D1H DOBLE HANDSHAKE
+        statusCallback?.Invoke($"[SIMULADOR D1H] Esperando segunda solicitud del PLC para receta 2 ({secondRecipe})...");
+        await Task.Delay(250, ct);
+
+        // PLC solicita de nuevo con 20
+        _simulator.SetOffset6(reqValue);
+        statusCallback?.Invoke($"[SIMULADOR D1H] Segunda solicitud ({reqValue}) detectada. Transmitiendo receta 2 = {secondRecipe} a {recipeAddress}...");
+
+        await Task.Delay(150, ct);
+        await _simulator.WriteRecipeAsync(secondRecipe, secondRecipe, ct);
+
+        await Task.Delay(250, ct);
+        _simulator.SetOffset6(ackValue);
+        int ack2 = _simulator.ReadOffset6();
 
         sw.Stop();
-        string msg = $"[SIMULADOR] Handshake completado: Reposo={idleValue} -> Solicitud={reqValue} -> Receta={sequenceRecipe} -> Confirmación={ack} -> Reposo final={idleValue}.";
+        string dualMsg = $"[SIMULADOR D1H] Doble handshake completado: R1={sequenceRecipe} confirmada con {ack1} -> R2={secondRecipe} confirmada con {ack2}.";
         return new S7HandshakeResult
         {
             Success = true,
@@ -1059,11 +1171,12 @@ public class PLCManager : IPLCService
             RecipeAddress = recipeAddress,
             SequenceRecipeSent = sequenceRecipe,
             HandshakeReqDetected = reqValue,
-            HandshakeAckReceived = ack,
-            IdleValueSent = idleValue,
-            IdleValueVerified = idleValue,
+            HandshakeAckReceived = ack1,
+            IsDualHandshake = true,
+            SecondRecipeSent = secondRecipe,
+            SecondHandshakeAckReceived = ack2,
             DurationMs = (int)sw.ElapsedMilliseconds,
-            Message = msg
+            Message = dualMsg
         };
     }
 
@@ -1149,6 +1262,9 @@ public class S7HandshakeResult
     public short SequenceRecipeSent { get; set; }
     public int HandshakeReqDetected { get; set; }
     public int HandshakeAckReceived { get; set; }
+    public bool IsDualHandshake { get; set; }
+    public short? SecondRecipeSent { get; set; }
+    public int? SecondHandshakeAckReceived { get; set; }
     public short IdleValueSent { get; set; }
     public short? IdleValueVerified { get; set; }
     public string Message { get; set; } = string.Empty;
